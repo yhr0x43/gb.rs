@@ -1,6 +1,7 @@
 pub struct Bus {
     boot_rom: [u8; 0x100],
-    wram: [u8; 8*0x1000],
+    vram: [u8; 0x2000],
+    wram: [u8; 0x2000],
 
     ime: bool,  /* interrupt master enable */
     reg_ie: u8, /* interrupt enable */
@@ -15,7 +16,8 @@ impl Bus {
     pub fn new(boot_rom: &[u8; 0x100]) -> Self {
         Bus {
             boot_rom: *boot_rom,
-            wram: [0; 8*0x1000],
+            vram: [0; 0x2000],
+            wram: [0; 0x2000],
             ime: false, reg_ie: 0, reg_if: 0,
         }
     }
@@ -33,8 +35,10 @@ impl Bus {
     pub fn read(&self, addr: u16) -> u8 {
         let uaddr: usize = addr.into();
 
-        if (addr & 0xE000) == 0xC000 { // C000 <= addr <= DFFF
+        if addr & 0xE000 == 0xC000 { // C000 <= addr <= DFFF
             self.wram[uaddr - 0xC000]
+        } else if addr & 0xE000 == 0x8000 { // 8000 <= addr <= 9FFF
+            self.vram[uaddr - 0x8000]
         } else if (addr & 0xFF00) == 0 {
             self.boot_rom[uaddr]
         } else {
@@ -43,8 +47,12 @@ impl Bus {
     }
 
     pub fn write(&mut self, addr: u16, val: u8) {
+        let uaddr: usize = addr.into();
+
         if (addr & 0xE000) == 0xC000 { // C000 <= addr <= DFFF
-            self.wram[(addr - 0xC000) as usize] = val
+            self.wram[uaddr - 0xC000] = val
+        } else if addr & 0xE000 == 0x8000 { // 8000 <= addr <= 9FFF
+            self.vram[uaddr - 0x8000] = val
         } else if addr == 0xFFFF {
             panic!("unimpl intr mask")
         } else {
