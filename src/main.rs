@@ -1,10 +1,10 @@
 mod bus;
-mod reg;
 mod cpu;
 use std::convert::TryInto;
 use std::fs::File;
 use std::io::BufReader;
 use std::io::BufRead;
+
 
 fn main() {
     let mut boot_rom_reader = BufReader::with_capacity(
@@ -22,8 +22,8 @@ fn main() {
     );
 
     while running {
-        println!("{cpu:?}");
         cpu.cycle(&mut bus);
+        println!("{cpu:?}");
         ticks += 1;
         if ticks > 20 { running = false; }
     }
