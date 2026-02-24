@@ -1,6 +1,5 @@
-use std::fmt;
 use bus;
-
+use std::fmt;
 
 #[derive(Debug)]
 enum MemOp {
@@ -17,7 +16,9 @@ impl MemOp {
     fn next(&self) -> Self {
         match self {
             Self::None => Self::None,
-            Self::Read8(_) | Self::Write8(_, _) | Self::Read16hi(_) | Self::Write16hi(_, _) => Self::None,
+            Self::Read8(_) | Self::Write8(_, _) | Self::Read16hi(_) | Self::Write16hi(_, _) => {
+                Self::None
+            }
             Self::Read16(addr) => Self::Read16hi(*addr),
             Self::Write16(addr, val) => Self::Write16hi(*addr, *val),
         }
@@ -26,7 +27,14 @@ impl MemOp {
 
 #[derive(Debug)]
 pub enum RegId8 {
-    B, C, D, E, H, L, A, F,
+    B,
+    C,
+    D,
+    E,
+    H,
+    L,
+    A,
+    F,
 }
 
 impl RegId8 {
@@ -45,10 +53,14 @@ impl RegId8 {
     }
 }
 
-
 #[derive(Debug)]
 pub enum RegId16 {
-    BC, DE, HL, SP, AF, PC,
+    BC,
+    DE,
+    HL,
+    SP,
+    AF,
+    PC,
 }
 
 impl RegId16 {
@@ -62,7 +74,6 @@ impl RegId16 {
         }
     }
 }
-
 
 #[derive(Debug)]
 enum Opd8 {
@@ -80,7 +91,6 @@ impl Opd8 {
     }
 }
 
-
 #[derive(Debug)]
 enum Opd16 {
     Reg(RegId16),
@@ -96,19 +106,31 @@ impl Opd16 {
 pub struct Reg(u16);
 
 impl Reg {
-    pub fn new(val: u16) -> Self { Self(val) }
-    pub fn x(&mut self) -> &mut u16 { &mut self.0 }
+    pub fn new(val: u16) -> Self {
+        Self(val)
+    }
+    pub fn x(&mut self) -> &mut u16 {
+        &mut self.0
+    }
     pub fn hi(&mut self) -> &mut u8 {
         #[cfg(target_endian = "little")]
-        unsafe { &mut *((&raw mut self.0).cast::<u8>().add(1)) }
+        unsafe {
+            &mut *((&raw mut self.0).cast::<u8>().add(1))
+        }
         #[cfg(not(target_endian = "little"))]
-        unsafe { &mut *((&raw mut self.0).cast::<u8>()) }
+        unsafe {
+            &mut *((&raw mut self.0).cast::<u8>())
+        }
     }
     pub fn lo(&mut self) -> &mut u8 {
         #[cfg(target_endian = "little")]
-        unsafe { &mut *((&raw mut self.0).cast::<u8>()) }
+        unsafe {
+            &mut *((&raw mut self.0).cast::<u8>())
+        }
         #[cfg(not(target_endian = "little"))]
-        unsafe { &mut *((&raw mut self.0).cast::<u8>().add(1)) }
+        unsafe {
+            &mut *((&raw mut self.0).cast::<u8>().add(1))
+        }
     }
 }
 
@@ -117,7 +139,6 @@ impl fmt::Debug for Reg {
         write!(f, "{:X}", self.0)
     }
 }
-
 
 #[derive(Debug)]
 pub struct Cpu {
@@ -136,20 +157,48 @@ pub struct Cpu {
 }
 
 impl Cpu {
-    pub fn bc(&mut self) -> &mut u16 { self.reg_bc.x() }
-    pub fn de(&mut self) -> &mut u16 { self.reg_de.x() }
-    pub fn hl(&mut self) -> &mut u16 { self.reg_hl.x() }
-    pub fn sp(&mut self) -> &mut u16 { self.reg_sp.x() }
-    pub fn af(&mut self) -> &mut u16 { self.reg_af.x() }
-    pub fn pc(&mut self) -> &mut u16 { self.reg_pc.x() }
-    pub fn b(&mut self) -> &mut u8 { self.reg_bc.hi() }
-    pub fn c(&mut self) -> &mut u8 { self.reg_bc.lo() }
-    pub fn d(&mut self) -> &mut u8 { self.reg_de.hi() }
-    pub fn e(&mut self) -> &mut u8 { self.reg_de.lo() }
-    pub fn h(&mut self) -> &mut u8 { self.reg_hl.hi() }
-    pub fn l(&mut self) -> &mut u8 { self.reg_hl.lo() }
-    pub fn a(&mut self) -> &mut u8 { self.reg_af.hi() }
-    pub fn f(&mut self) -> &mut u8 { self.reg_af.lo() }
+    pub fn bc(&mut self) -> &mut u16 {
+        self.reg_bc.x()
+    }
+    pub fn de(&mut self) -> &mut u16 {
+        self.reg_de.x()
+    }
+    pub fn hl(&mut self) -> &mut u16 {
+        self.reg_hl.x()
+    }
+    pub fn sp(&mut self) -> &mut u16 {
+        self.reg_sp.x()
+    }
+    pub fn af(&mut self) -> &mut u16 {
+        self.reg_af.x()
+    }
+    pub fn pc(&mut self) -> &mut u16 {
+        self.reg_pc.x()
+    }
+    pub fn b(&mut self) -> &mut u8 {
+        self.reg_bc.hi()
+    }
+    pub fn c(&mut self) -> &mut u8 {
+        self.reg_bc.lo()
+    }
+    pub fn d(&mut self) -> &mut u8 {
+        self.reg_de.hi()
+    }
+    pub fn e(&mut self) -> &mut u8 {
+        self.reg_de.lo()
+    }
+    pub fn h(&mut self) -> &mut u8 {
+        self.reg_hl.hi()
+    }
+    pub fn l(&mut self) -> &mut u8 {
+        self.reg_hl.lo()
+    }
+    pub fn a(&mut self) -> &mut u8 {
+        self.reg_af.hi()
+    }
+    pub fn f(&mut self) -> &mut u8 {
+        self.reg_af.lo()
+    }
 
     pub fn new() -> Self {
         Cpu {
@@ -198,19 +247,17 @@ impl Cpu {
         self.reg8(RegId8::new(idx))
     }
 
-
     /* one cycle is one M-cycle, 4 T-states
      * one cycle can only have at most 1 bus read/write
      * thus it can be separate into 3 parts: pre-, perform-, post- memory
      */
     pub fn cycle(&mut self, bus: &mut bus::Bus) {
-
         /* begin pre-memory */
 
         if self.subcycle == 0 {
             if bus.intr_poll() {
                 /* respond to intr after last inst and before fetch */
-                panic!("unimpl cpu intr handling");
+                unreachable!("unimpl cpu intr handling");
             }
             self.memop = MemOp::Read8(*self.reg_pc.x());
         }
@@ -218,7 +265,7 @@ impl Cpu {
         /* end pre-memory */
 
         match self.memop {
-            MemOp::None => {},
+            MemOp::None => {}
             MemOp::Read8(addr) => self.read_val = bus.read(addr) as u16,
             MemOp::Read16(addr) => self.read_val = bus.read(addr) as u16,
             MemOp::Read16hi(addr) => self.read_val |= (bus.read(addr + 1) as u16) << 8,
@@ -227,7 +274,6 @@ impl Cpu {
             MemOp::Write16hi(addr, val) => bus.write(addr + 1, (val >> 8) as u8),
         }
         self.memop = self.memop.next();
-        /* if !(matches!(self.memop, MemOp::None)) { return } */
 
         /* begin post-memory */
 
@@ -240,36 +286,59 @@ impl Cpu {
         /* TODO(yhr0x43): decode the inst byte every cycle, the code is cleaner
          * for now... but an internal repr of types of inst could be helpful
          */
-        if self.opcode & !0x31 == 0 {
+        if self.opcode & 0xCF == 0x01 {
             // LD r16, n16
             if self.subcycle == 0 {
-                self.memop = MemOp::Read16(*self.pc() + 1);
                 self.subcycle = 3;
+                self.memop = MemOp::Read16(*self.pc() + 1);
             } else if self.subcycle == 1 {
                 let val = self.read_val;
                 *self.reg16(RegId16::new(self.opcode >> 4)) = val;
                 *self.pc() += 3;
             }
-        } else if self.opcode & 0xA8 == 0xA8 {
+        } else if self.opcode & 0xCF == 0x02 {
+            // LD [r16(+/-)], A
+            if self.subcycle == 0 {
+                self.subcycle = 2;
+                self.memop = MemOp::Write8(
+                    match self.opcode >> 4 {
+                        0 => *self.bc(),
+                        1 => *self.de(),
+                        2 | 3 => *self.hl(),
+                        _ => unreachable!("invalid reg indirect idx"),
+                    },
+                    *self.a(),
+                );
+            } else if self.subcycle == 1 {
+                match self.opcode >> 4 {
+                    2 => *self.hl() += 1,
+                    3 => *self.hl() -= 1,
+                    _ => {}
+                }
+                *self.pc() += 1;
+            }
+        } else if self.opcode & 0xF8 == 0xA8 {
             // XOR A, r/m8
             if self.subcycle == 0 {
                 match Opd8::regmem(self.opcode & 0x07) {
                     Opd8::Reg(regid) => {
                         self.subcycle = 1;
                         *self.a() ^= *self.reg8(regid);
+                        *self.f() = 0x70 | if *self.a() == 0 { 0x80 } else { 0 };
                         *self.pc() += 1;
-                    },
+                    }
                     Opd8::IndReg(regid) => {
                         self.subcycle = 2;
                         self.memop = MemOp::Read8(*self.reg16(regid));
-                    },
+                    }
                 }
             } else if self.subcycle == 1 {
                 *self.a() ^= self.read_val as u8;
+                *self.f() = 0x70 | if *self.a() == 0 { 0x80 } else { 0 };
                 *self.pc() += 1;
             }
         } else {
-            panic!("unimpl inst")
+            unreachable!(format!("unimpl inst {0:X}", self.opcode))
         }
 
         /* end post-memory */
