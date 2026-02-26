@@ -1,6 +1,6 @@
 pub struct Bus {
-    boot_rom: [u8; 0x100],
-    vram: [u8; 0x2000],
+    boot_rom: [u8; 0x100], /*unsigned8; Hex notation*/
+    vram: [u8; 0x2000], 
     wram: [u8; 0x2000],
 
     ime: bool,  /* interrupt master enable */
@@ -28,7 +28,7 @@ impl Bus {
 
     pub fn intr_raise(source: IntrSource) {
         match source {
-            _ => panic!("unimpl interrupt"),
+            _ => todo!("unimpl interrupt"),
         }
     }
 

@@ -338,7 +338,7 @@ impl Cpu {
                 *self.pc() += 1;
             }
         } else {
-            unreachable!(format!("unimpl inst {0:X}", self.opcode))
+            todo!("unimpl inst {0:X}", self.opcode)
         }
 
         /* end post-memory */
