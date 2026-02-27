@@ -1,55 +1,55 @@
-use crate::bus;
-use std::cell::Cell;
+use std::cell::UnsafeCell;
 use std::fmt;
 use std::ops;
+use std::mem;
+
+use crate::bus;
+use crate::log::*;
+use crate::*;
 
 #[repr(transparent)]
-struct Reg<T>(Cell<T>);
+struct Reg<T> {
+    value: UnsafeCell<T>,
+}
 
-impl<T: Sized> Reg<T> {
+impl<T: Sized + Copy> Reg<T> {
     fn from_mut(t: &mut T) -> &mut Self {
         unsafe { &mut *(t as *mut T as *mut Self) }
     }
-}
 
-impl<T> ops::Deref for Reg<T> {
-    type Target = Cell<T>;
+    pub fn set(&self, val: T) {
+        self.replace(val);
+    }
 
-    fn deref(&self) -> &Self::Target {
-        &self.0
+    pub fn replace(&self, val: T) -> T {
+        mem::replace(unsafe { &mut *self.value.get() }, val)
+    }
+
+    pub fn get(&self) -> T {
+        unsafe { *self.value.get() }
     }
 }
 
 impl<T: fmt::UpperHex + Copy> fmt::Debug for Reg<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        write!(f, "{:X}", &self.get())
+        write!(f, "{:X}", self.get())
     }
 }
 
-impl<T: ops::BitXor<Output = T> + Copy> ops::BitXorAssign<T> for Reg<T> {
-    fn bitxor_assign(&mut self, other: T) {
-        self.set(self.get() ^ other)
+impl<T: ops::BitXor<Output = T> + Copy> Reg<T> {
+    fn xor(&self, t: T) -> T {
+        self.replace(self.get() ^ t)
     }
 }
 
 impl<T: ops::Add<Output = T> + Copy> Reg<T> {
     fn inc(&self, t: T) -> T {
-        self.set(self.get() + t);
-        self.get()
-    }
-
-    fn inc_post(&self, t: T) -> T {
         self.replace(self.get() + t)
     }
 }
 
 impl<T: ops::Sub<Output = T> + Copy> Reg<T> {
     fn dec(&self, t: T) -> T {
-        self.set(self.get() - t);
-        self.get()
-    }
-
-    fn dec_post(&self, t: T) -> T {
         self.replace(self.get() - t)
     }
 }
@@ -109,14 +109,6 @@ impl RegId16 {
         }
     }
 }
-
-#[derive(Debug)]
-enum Opd8 {
-    Reg(RegId8),
-    IndReg(RegId16),
-}
-
-impl Opd8 {}
 
 #[derive(Debug, Clone, Copy)]
 enum OpdSrc {
@@ -192,6 +184,7 @@ enum Stage {
     Write(OpdDst),
 }
 
+#[derive(Debug)]
 enum ReadVal {
     None,
     Done8(u8),
@@ -234,7 +227,6 @@ enum Phase {
     ValueReady(ReadVal),
 }
 
-#[derive(Debug)]
 pub struct Cpu {
     regs: [u16; 6],
 
@@ -243,22 +235,37 @@ pub struct Cpu {
     stage: Stage,
 }
 
+impl fmt::Debug for Cpu {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        f.debug_struct("Cpu")
+            .field("BC", self.r16(RegId16::BC))
+            .field("DE", self.r16(RegId16::DE))
+            .field("HL", self.r16(RegId16::HL))
+            .field("AF", self.r16(RegId16::AF))
+            .field("SP", self.r16(RegId16::SP))
+            .field("PC", self.r16(RegId16::PC))
+            .field("opcode", &format_args!("{:02X}", self.opcode))
+            .field("stage", &self.stage)
+            .finish()
+    }
+}
+
 #[rustfmt::skip]
 impl Cpu {
-    fn bc(&self) -> &mut Reg<u16> { self.r16(RegId16::BC) }
-    fn de(&self) -> &mut Reg<u16> { self.r16(RegId16::DE) }
-    fn hl(&self) -> &mut Reg<u16> { self.r16(RegId16::HL) }
-    fn af(&self) -> &mut Reg<u16> { self.r16(RegId16::AF) }
-    fn sp(&self) -> &mut Reg<u16> { self.r16(RegId16::SP) }
-    fn pc(&self) -> &mut Reg<u16> { self.r16(RegId16::PC) }
-    fn b(&self) -> &mut Reg<u8> { self.r8(RegId8::B) }
-    fn c(&self) -> &mut Reg<u8> { self.r8(RegId8::C) }
-    fn d(&self) -> &mut Reg<u8> { self.r8(RegId8::D) }
-    fn e(&self) -> &mut Reg<u8> { self.r8(RegId8::E) }
-    fn h(&self) -> &mut Reg<u8> { self.r8(RegId8::H) }
-    fn l(&self) -> &mut Reg<u8> { self.r8(RegId8::L) }
-    fn a(&self) -> &mut Reg<u8> { self.r8(RegId8::A) }
-    fn f(&self) -> &mut Reg<u8> { self.r8(RegId8::F) }
+    fn bc(&self) -> &Reg<u16> { self.r16(RegId16::BC) }
+    fn de(&self) -> &Reg<u16> { self.r16(RegId16::DE) }
+    fn hl(&self) -> &Reg<u16> { self.r16(RegId16::HL) }
+    fn af(&self) -> &Reg<u16> { self.r16(RegId16::AF) }
+    fn sp(&self) -> &Reg<u16> { self.r16(RegId16::SP) }
+    fn pc(&self) -> &Reg<u16> { self.r16(RegId16::PC) }
+    fn b(&self) -> &Reg<u8> { self.r8(RegId8::B) }
+    fn c(&self) -> &Reg<u8> { self.r8(RegId8::C) }
+    fn d(&self) -> &Reg<u8> { self.r8(RegId8::D) }
+    fn e(&self) -> &Reg<u8> { self.r8(RegId8::E) }
+    fn h(&self) -> &Reg<u8> { self.r8(RegId8::H) }
+    fn l(&self) -> &Reg<u8> { self.r8(RegId8::L) }
+    fn a(&self) -> &Reg<u8> { self.r8(RegId8::A) }
+    fn f(&self) -> &Reg<u8> { self.r8(RegId8::F) }
 }
 
 impl Cpu {
@@ -270,11 +277,11 @@ impl Cpu {
         }
     }
 
-    fn r16(&self, id: RegId16) -> &mut Reg<u16> {
+    fn r16(&self, id: RegId16) -> &Reg<u16> {
         Reg::<u16>::from_mut(unsafe { &mut *(&raw const self.regs[id as usize] as *mut u16) })
     }
 
-    fn r8(&self, id: RegId8) -> &mut Reg<u8> {
+    fn r8(&self, id: RegId8) -> &Reg<u8> {
         const ARCH_IS_LE: bool = cfg!(target_endian = "little");
         const HI_OFFSET: usize = if ARCH_IS_LE { 1 } else { 0 };
         const LO_OFFSET: usize = if ARCH_IS_LE { 0 } else { 1 };
@@ -288,22 +295,13 @@ impl Cpu {
         })
     }
 
-    fn regmem_src(&self, cpu: &Cpu, idx: u8) -> OpdSrc {
-        if idx == 6 {
-            OpdSrc::Mem8(cpu.hl().get())
-        } else {
-            OpdSrc::Done8(cpu.r8(RegId8::decode(idx)).get())
-        }
-    }
-
     fn inst_step(&self, phase: Phase) -> Stage {
         if self.opcode & 0xCF == 0x01 {
             // LD r16, n16
             match phase {
                 Phase::InstFetch => Stage::Read(OpdSrc::Mem16(self.pc().get() + 1)),
                 Phase::ValueReady(src) => {
-                    let val = src.get16();
-                    self.r16(RegId16::decode(self.opcode >> 4)).set(val);
+                    self.r16(RegId16::decode(self.opcode >> 4)).set(src.get16());
                     self.pc().inc(3);
                     Stage::Fetch
                 }
@@ -317,8 +315,8 @@ impl Cpu {
                         match self.opcode >> 4 {
                             0 => self.bc().get(),
                             1 => self.de().get(),
-                            2 => self.hl().inc_post(1),
-                            3 => self.hl().dec_post(1),
+                            2 => self.hl().inc(1),
+                            3 => self.hl().dec(1),
                             _ => unreachable!("invalid reg indirect idx"),
                         },
                         self.a().get(),
@@ -338,7 +336,7 @@ impl Cpu {
                     })
                 }
                 Phase::ValueReady(src) => {
-                    *self.a() ^= src.get8();
+                    self.a().xor(src.get8());
                     self.f()
                         .set(0x70 | if self.a().get() == 0 { 0x80 } else { 0 });
                     self.pc().inc(1);
