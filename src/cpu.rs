@@ -3,31 +3,6 @@ use std::cell::Cell;
 use std::fmt;
 use std::ops;
 
-#[derive(Debug)]
-enum MemOp {
-    None,
-    Read8(u16),
-    Write8(u16, u8),
-    Read16(u16),
-    Write16(u16, u16),
-    Read16hi(u16),
-    Write16hi(u16, u16),
-}
-
-impl MemOp {
-    fn next(&self) -> Self {
-        match self {
-            Self::None => Self::None,
-            Self::Read8(_) | Self::Write8(_, _) | Self::Read16hi(_) | Self::Write16hi(_, _) => {
-                Self::None
-            }
-            Self::Read16(addr) => Self::Read16hi(*addr),
-            Self::Write16(addr, val) => Self::Write16hi(*addr, *val),
-        }
-    }
-}
-
-
 #[repr(transparent)]
 struct Reg<T>(Cell<T>);
 
@@ -57,26 +32,34 @@ impl<T: ops::BitXor<Output = T> + Copy> ops::BitXorAssign<T> for Reg<T> {
     }
 }
 
-impl<T: ops::Add<Output = T> + Copy> ops::AddAssign<T> for Reg<T> {
-    fn add_assign(&mut self, other: T) {
-        self.set(self.get() + other)
+impl<T: ops::Add<Output = T> + Copy> Reg<T> {
+    fn inc(&self, t: T) -> T {
+        self.set(self.get() + t);
+        self.get()
+    }
+
+    fn inc_post(&self, t: T) -> T {
+        self.replace(self.get() + t)
     }
 }
 
-impl<T: ops::Sub<Output = T> + Copy> ops::SubAssign<T> for Reg<T> {
-    fn sub_assign(&mut self, other: T) {
-        self.set(self.get() - other)
+impl<T: ops::Sub<Output = T> + Copy> Reg<T> {
+    fn dec(&self, t: T) -> T {
+        self.set(self.get() - t);
+        self.get()
+    }
+
+    fn dec_post(&self, t: T) -> T {
+        self.replace(self.get() - t)
     }
 }
-
 
 enum HiLo {
     Hi,
     Lo,
 }
 
-
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 #[rustfmt::skip]
 enum RegId8 { B, C, D, E, H, L, A, F }
 
@@ -111,7 +94,7 @@ impl RegId8 {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 #[rustfmt::skip]
 enum RegId16 { BC, DE, HL, AF, SP, PC }
 
@@ -133,26 +116,122 @@ enum Opd8 {
     IndReg(RegId16),
 }
 
-impl Opd8 {
-    pub fn regmem(idx: u8) -> Self {
-        if idx == 6 {
-            Self::IndReg(RegId16::HL)
-        } else {
-            Self::Reg(RegId8::decode(idx))
+impl Opd8 {}
+
+#[derive(Debug, Clone, Copy)]
+enum OpdSrc {
+    None,
+    Mem8(bus::Addr),
+    Done8(u8),
+    Mem16(bus::Addr),
+    Mem16Half(bus::Addr, u8),
+    Done16(u16),
+}
+
+#[derive(Debug, Clone, Copy)]
+enum OpdDst {
+    None,
+    Mem8(bus::Addr, u8),
+    Mem16(bus::Addr, u16),
+    Mem16Half(bus::Addr, u8),
+    Done,
+}
+
+impl OpdSrc {
+    pub fn read_step(&self, bus: &bus::Bus) -> OpdSrc {
+        match self {
+            OpdSrc::None | OpdSrc::Done8(_) | OpdSrc::Done16(_) => *self,
+            OpdSrc::Mem8(addr) => OpdSrc::Done8(bus.read(*addr)),
+            OpdSrc::Mem16(addr) => OpdSrc::Mem16Half(*addr, bus.read(*addr)),
+            OpdSrc::Mem16Half(addr, lo) => {
+                OpdSrc::Done16((bus.read(*addr + 1) as u16) << 8 | *lo as u16)
+            }
+        }
+    }
+
+    pub fn ready(&self) -> bool {
+        match self {
+            OpdSrc::None | OpdSrc::Done8(_) | OpdSrc::Done16(_) => true,
+            _ => false,
+        }
+    }
+}
+
+impl OpdDst {
+    pub fn write_step(&self, bus: &mut bus::Bus) -> OpdDst {
+        match self {
+            OpdDst::None | OpdDst::Done => *self,
+            OpdDst::Mem8(addr, val) => {
+                bus.write(*addr, *val);
+                OpdDst::Done
+            }
+            OpdDst::Mem16(addr, val) => {
+                bus.write(*addr, *val as u8);
+                OpdDst::Mem16Half(*addr, (*val >> 8) as u8)
+            }
+            OpdDst::Mem16Half(addr, hi) => {
+                bus.write(*addr + 1, *hi);
+                OpdDst::Done
+            }
+        }
+    }
+
+    pub fn ready(&self) -> bool {
+        match self {
+            OpdDst::None | OpdDst::Done => true,
+            _ => false,
         }
     }
 }
 
 #[derive(Debug)]
-enum Opd16 {
-    Reg(RegId16),
-    Mem(u16),
+enum Stage {
+    Fetch,
+    Read(OpdSrc),
+    Wait(OpdDst),
+    Write(OpdDst),
 }
 
-impl Opd16 {
-    pub fn reg(idx: u8) -> Self {
-        Self::Reg(RegId16::decode(idx))
+enum ReadVal {
+    None,
+    Done8(u8),
+    Done16(u16),
+}
+
+impl From<OpdSrc> for ReadVal {
+    fn from(value: OpdSrc) -> ReadVal {
+        match value {
+            OpdSrc::None => ReadVal::None,
+            OpdSrc::Done8(val) => ReadVal::Done8(val),
+            OpdSrc::Done16(val) => ReadVal::Done16(val),
+            OpdSrc::Mem8(_) | OpdSrc::Mem16(_) | OpdSrc::Mem16Half(_, _) => {
+                unreachable!("illegal conversion to phase")
+            }
+        }
     }
+}
+
+impl ReadVal {
+    pub fn get8(&self) -> u8 {
+        if let ReadVal::Done8(val) = self {
+            *val
+        } else {
+            unreachable!("illegal 8-bit value read")
+        }
+    }
+
+    pub fn get16(&self) -> u16 {
+        if let ReadVal::Done16(val) = self {
+            *val
+        } else {
+            unreachable!("illegal 16-bit value read")
+        }
+    }
+}
+
+enum Phase {
+    InstFetch,
+    ValueReady(ReadVal),
 }
 
 #[derive(Debug)]
@@ -160,10 +239,8 @@ pub struct Cpu {
     regs: [u16; 6],
 
     /* sub-instruction M-cycles state */
-    opcode: u8,    /* executing opcode */
-    memop: MemOp,  /* requested memory operation for this cycle */
-    read_val: u16, /* result of read op, */
-    subcycle: u8,  /* inc per memop, set to 0 at the end of inst */
+    opcode: u8, /* executing opcode */
+    stage: Stage,
 }
 
 #[rustfmt::skip]
@@ -171,8 +248,8 @@ impl Cpu {
     fn bc(&self) -> &mut Reg<u16> { self.r16(RegId16::BC) }
     fn de(&self) -> &mut Reg<u16> { self.r16(RegId16::DE) }
     fn hl(&self) -> &mut Reg<u16> { self.r16(RegId16::HL) }
-    fn sp(&self) -> &mut Reg<u16> { self.r16(RegId16::SP) }
     fn af(&self) -> &mut Reg<u16> { self.r16(RegId16::AF) }
+    fn sp(&self) -> &mut Reg<u16> { self.r16(RegId16::SP) }
     fn pc(&self) -> &mut Reg<u16> { self.r16(RegId16::PC) }
     fn b(&self) -> &mut Reg<u8> { self.r8(RegId8::B) }
     fn c(&self) -> &mut Reg<u8> { self.r8(RegId8::C) }
@@ -189,16 +266,12 @@ impl Cpu {
         Cpu {
             regs: [0; 6],
             opcode: 0, /* TODO(yhr0x43): starting opcode? */
-            memop: MemOp::None,
-            read_val: 0,
-            subcycle: 0,
+            stage: Stage::Fetch,
         }
     }
 
     fn r16(&self, id: RegId16) -> &mut Reg<u16> {
-        Reg::<u16>::from_mut(
-            unsafe { &mut *(&raw const self.regs[id as usize] as *mut u16) }
-        )
+        Reg::<u16>::from_mut(unsafe { &mut *(&raw const self.regs[id as usize] as *mut u16) })
     }
 
     fn r8(&self, id: RegId8) -> &mut Reg<u8> {
@@ -208,118 +281,102 @@ impl Cpu {
 
         let p_reg16 = &raw const self.regs[id.resides() as usize] as *mut u16;
         Reg::<u8>::from_mut(unsafe {
-            &mut *p_reg16.cast::<u8>().add(
-                match id.hilo() {
-                    HiLo::Hi => HI_OFFSET,
-                    HiLo::Lo => LO_OFFSET,
-                }
-            )
+            &mut *p_reg16.cast::<u8>().add(match id.hilo() {
+                HiLo::Hi => HI_OFFSET,
+                HiLo::Lo => LO_OFFSET,
+            })
         })
     }
 
-    /* one cycle is one M-cycle, 4 T-states
-     * one cycle can only have at most 1 bus read/write
-     * thus it can be separate into 3 parts: pre-, perform-, post- memory
-     *
-     * all inst can be broken down to these stages:
-     * - Fetch/Decode
-     * - Mem Read
-     * - Execute
-     * - Mem Write
-     * - Wait
-     */
-    pub fn cycle(&mut self, bus: &mut bus::Bus) {
-        /* begin pre-memory */
-
-        if self.subcycle == 0 {
-            if bus.intr_poll() {
-                /* respond to intr after last inst and before fetch */
-                unreachable!("unimpl cpu intr handling");
-            }
-            self.memop = MemOp::Read8(self.pc().get());
+    fn regmem_src(&self, cpu: &Cpu, idx: u8) -> OpdSrc {
+        if idx == 6 {
+            OpdSrc::Mem8(cpu.hl().get())
+        } else {
+            OpdSrc::Done8(cpu.r8(RegId8::decode(idx)).get())
         }
+    }
 
-        /* end pre-memory */
-
-        match self.memop {
-            MemOp::None => {}
-            MemOp::Read8(addr) => self.read_val = bus.read(addr) as u16,
-            MemOp::Read16(addr) => self.read_val = bus.read(addr) as u16,
-            MemOp::Read16hi(addr) => self.read_val |= (bus.read(addr + 1) as u16) << 8,
-            MemOp::Write8(addr, val) => bus.write(addr, val),
-            MemOp::Write16(addr, val) => bus.write(addr, val as u8),
-            MemOp::Write16hi(addr, val) => bus.write(addr + 1, (val >> 8) as u8),
-        }
-        self.memop = self.memop.next();
-
-        /* begin post-memory */
-
-        /* fetch instruction */
-        if self.subcycle == 0 {
-            self.opcode = self.read_val as u8;
-        }
-
-        /* instruction decoding */
-        /* TODO(yhr0x43): decode the inst byte every cycle, the code is cleaner
-         * for now... but an internal repr of types of inst could be helpful
-         */
+    fn inst_step(&self, phase: Phase) -> Stage {
         if self.opcode & 0xCF == 0x01 {
             // LD r16, n16
-            if self.subcycle == 0 {
-                self.subcycle = 3;
-                self.memop = MemOp::Read16(self.pc().get() + 1);
-            } else if self.subcycle == 1 {
-                self.r16(RegId16::decode(self.opcode >> 4))
-                    .set(self.read_val);
-                *self.pc() += 3;
+            match phase {
+                Phase::InstFetch => Stage::Read(OpdSrc::Mem16(self.pc().get() + 1)),
+                Phase::ValueReady(src) => {
+                    let val = src.get16();
+                    self.r16(RegId16::decode(self.opcode >> 4)).set(val);
+                    self.pc().inc(3);
+                    Stage::Fetch
+                }
             }
         } else if self.opcode & 0xCF == 0x02 {
             // LD [r16(+/-)], A
-            if self.subcycle == 0 {
-                self.subcycle = 2;
-                self.memop = MemOp::Write8(
-                    match self.opcode >> 4 {
-                        0 => self.bc().get(),
-                        1 => self.de().get(),
-                        2 | 3 => self.hl().get(),
-                        _ => unreachable!("invalid reg indirect idx"),
-                    },
-                    self.a().get(),
-                );
-            } else if self.subcycle == 1 {
-                match self.opcode >> 4 {
-                    2 => *self.hl() += 1,
-                    3 => *self.hl() -= 1,
-                    _ => {}
+            match phase {
+                Phase::InstFetch => {
+                    self.pc().inc(1);
+                    Stage::Write(OpdDst::Mem8(
+                        match self.opcode >> 4 {
+                            0 => self.bc().get(),
+                            1 => self.de().get(),
+                            2 => self.hl().inc_post(1),
+                            3 => self.hl().dec_post(1),
+                            _ => unreachable!("invalid reg indirect idx"),
+                        },
+                        self.a().get(),
+                    ))
                 }
-                *self.pc() += 1;
+                Phase::ValueReady(_) => unreachable!(),
             }
         } else if self.opcode & 0xF8 == 0xA8 {
             // XOR A, r/m8
-            if self.subcycle == 0 {
-                match Opd8::regmem(self.opcode & 0x07) {
-                    Opd8::Reg(regid) => {
-                        self.subcycle = 1;
-                        *self.a() ^= self.r8(regid).get();
-                        self.f().set(0x70 | if self.a().get() == 0 { 0x80 } else { 0 });
-                        *self.pc() += 1;
-                    }
-                    Opd8::IndReg(regid) => {
-                        self.subcycle = 2;
-                        self.memop = MemOp::Read8(self.r16(regid).get());
-                    }
+            match phase {
+                Phase::InstFetch => {
+                    let idx = self.opcode & 0x07;
+                    Stage::Read(if idx == 6 {
+                        OpdSrc::Mem8(self.hl().get())
+                    } else {
+                        OpdSrc::Done8(self.r8(RegId8::decode(idx)).get())
+                    })
                 }
-            } else if self.subcycle == 1 {
-                *self.a() ^= self.read_val as u8;
-                self.f().set(0x70 | if self.a().get() == 0 { 0x80 } else { 0 });
-                *self.pc() += 1;
+                Phase::ValueReady(src) => {
+                    *self.a() ^= src.get8();
+                    self.f()
+                        .set(0x70 | if self.a().get() == 0 { 0x80 } else { 0 });
+                    self.pc().inc(1);
+                    Stage::Fetch
+                }
             }
         } else {
             todo!("unimpl inst {0:X}", self.opcode)
         }
+    }
 
-        /* end post-memory */
-
-        self.subcycle -= 1;
+    /*
+     * one cycle is one M-cycle, 4 T states in Z80 terms
+     * one cycle can only have at most 1 bus read/write
+     */
+    pub fn cycle(&mut self, bus: &mut bus::Bus) {
+        self.stage = match self.stage {
+            Stage::Fetch => {
+                self.opcode = bus.read(self.pc().get());
+                self.inst_step(Phase::InstFetch)
+            }
+            Stage::Read(src) => {
+                let src = src.read_step(bus);
+                if src.ready() {
+                    self.inst_step(Phase::ValueReady(src.into()))
+                } else {
+                    Stage::Read(src)
+                }
+            }
+            Stage::Wait(dst) => Stage::Write(dst),
+            Stage::Write(dst) => {
+                let dst = dst.write_step(bus);
+                if dst.ready() {
+                    Stage::Fetch
+                } else {
+                    Stage::Write(dst)
+                }
+            }
+        }
     }
 }

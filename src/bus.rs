@@ -1,3 +1,5 @@
+pub type Addr = u16;
+
 pub struct Bus {
     boot_rom: [u8; 0x100], /*unsigned8; Hex notation*/
     vram: [u8; 0x2000], 
@@ -9,7 +11,7 @@ pub struct Bus {
 }
 
 pub enum IntrSource {
-    JOYPAD,
+    Joypad,
 }
 
 impl Bus {
@@ -32,7 +34,7 @@ impl Bus {
         }
     }
 
-    pub fn read(&self, addr: u16) -> u8 {
+    pub fn read(&self, addr: Addr) -> u8 {
         let uaddr: usize = addr.into();
 
         if addr & 0xE000 == 0xC000 { // C000 <= addr <= DFFF
@@ -46,7 +48,7 @@ impl Bus {
         }
     }
 
-    pub fn write(&mut self, addr: u16, val: u8) {
+    pub fn write(&mut self, addr: Addr, val: u8) {
         let uaddr: usize = addr.into();
 
         if (addr & 0xE000) == 0xC000 { // C000 <= addr <= DFFF
