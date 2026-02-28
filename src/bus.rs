@@ -25,7 +25,7 @@ impl Bus {
         } else if (addr & 0xFF00) == 0 {
             self.boot_rom[uaddr]
         } else {
-            todo!("memory address")
+            todo!("memory address {:04X}", addr)
         }
     }
 
@@ -39,7 +39,7 @@ impl Bus {
         } else if addr == 0xFFFF {
             todo!("intr mask")
         } else {
-            todo!("memory address")
+            todo!("memory address {:04X}", addr)
         }
     }
 }

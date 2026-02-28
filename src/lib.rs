@@ -18,7 +18,7 @@ fn emu_run(boot_rom: &[u8; 0x100]) {
 
     while running {
         cpu.cycle(&mut bus);
-        console_log!("{ticks:?}: {cpu:?}");
+        println!("{ticks:3}: {cpu:?}");
         ticks += 1;
         if ticks > 20 {
             running = false;

@@ -6,7 +6,6 @@ use core::ptr::copy_nonoverlapping;
 unsafe extern "C" {
     pub fn wasm_log(ptr: *const u8, len: usize);
     pub fn wasm_never(exit_code: usize) -> !;
-    pub fn boot_rom(ptr: *const u8);
 }
 
 struct WasmWriter {
@@ -49,19 +48,21 @@ impl Write for WasmWriter {
 
 pub fn wrap_wasm_log(value: &Arguments) {
     let mut w = WasmWriter::new();
-    write!(&mut w, "{}", value);
+    write!(&mut w, "{}", value).unwrap();
     w.flush();
 }
 
 #[macro_export]
-macro_rules! console_log {
+macro_rules! println {
     ($($t:tt)*) => ( wrap_wasm_log(&format_args!($($t)*)) )
 }
 
 #[panic_handler]
 fn wasm_panic(info: &PanicInfo) -> ! {
     let mut w = WasmWriter::new();
-    write!(w, "{}", info);
+    write!(w, "{}", info).unwrap_or_else(|_| {
+        write!(w, "panic formatting failure").unwrap_or(());
+    });
     w.flush();
     unsafe { wasm_never(0) }
 }
