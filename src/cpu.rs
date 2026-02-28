@@ -1,11 +1,9 @@
-use std::cell::UnsafeCell;
-use std::fmt;
-use std::ops;
-use std::mem;
+use core::cell::UnsafeCell;
+use core::fmt;
+use core::mem;
+use core::ops;
 
 use crate::bus;
-use crate::log::*;
-use crate::*;
 
 #[repr(transparent)]
 struct Reg<T> {
@@ -179,6 +177,7 @@ impl OpdDst {
 #[derive(Debug)]
 enum Stage {
     Fetch,
+    PrefixedFetch,
     Read(OpdSrc),
     Wait(OpdDst),
     Write(OpdDst),
@@ -233,10 +232,11 @@ pub struct Cpu {
     /* sub-instruction M-cycles state */
     opcode: u8, /* executing opcode */
     stage: Stage,
+    prefixed: bool,
 }
 
 impl fmt::Debug for Cpu {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         f.debug_struct("Cpu")
             .field("BC", self.r16(RegId16::BC))
             .field("DE", self.r16(RegId16::DE))
@@ -246,6 +246,7 @@ impl fmt::Debug for Cpu {
             .field("PC", self.r16(RegId16::PC))
             .field("opcode", &format_args!("{:02X}", self.opcode))
             .field("stage", &self.stage)
+            .field("prefixed", &self.prefixed)
             .finish()
     }
 }
@@ -274,6 +275,7 @@ impl Cpu {
             regs: [0; 6],
             opcode: 0, /* TODO(yhr0x43): starting opcode? */
             stage: Stage::Fetch,
+            prefixed: false,
         }
     }
 
@@ -293,6 +295,9 @@ impl Cpu {
                 HiLo::Lo => LO_OFFSET,
             })
         })
+    }
+
+    fn inst_prefix_step(&self, phase: Phase) -> Stage {
     }
 
     fn inst_step(&self, phase: Phase) -> Stage {
@@ -344,7 +349,7 @@ impl Cpu {
                 }
             }
         } else {
-            todo!("unimpl inst {0:X}", self.opcode)
+            todo!("instruction {:02X}", self.opcode)
         }
     }
 
@@ -356,7 +361,16 @@ impl Cpu {
         self.stage = match self.stage {
             Stage::Fetch => {
                 self.opcode = bus.read(self.pc().get());
-                self.inst_step(Phase::InstFetch)
+                if (self.opcode == 0xCB) {
+                    self.pc().inc(1);
+                    Stage::PrefixedFetch
+                } else {
+                    self.inst_step(Phase::InstFetch)
+                }
+            }
+            Stage::PrefixedFetch => {
+                self.opcode = bus.read(self.pc().get());
+                self.inst_prefix_step(Phase::InstFetch)
             }
             Stage::Read(src) => {
                 let src = src.read_step(bus);
