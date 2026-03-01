@@ -46,7 +46,7 @@ impl Apu {
         self.cycle_count += cycles as u64; // Update frequency and counters and stuff
     }
 
-    pub fn writeByte(&mut self, addr: u16, val: u8) {
+    pub fn write(&mut self, addr: u16, val: u8) {
         match addr {
             0xFF10 => self.nr10 = val,
             0xFF11 => self.nr11 = val,
@@ -80,7 +80,7 @@ impl Apu {
         }
     }
 
-    pub fn readByte(&self, addr: u16) -> u8 {
+    pub fn read(&self, addr: u16) -> u8 {
         match addr {
             0xFF10 => self.nr10,
             0xFF11 => self.nr11,
@@ -114,7 +114,7 @@ impl Apu {
         }
     }
     
-    pub fn nextSample(&mut self) -> (f32, f32) {
+    pub fn next_sample(&mut self) -> (f32, f32) {
         // Temp. Just return silence for now
         (0.0, 0.0)
     }
