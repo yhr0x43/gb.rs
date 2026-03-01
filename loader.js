@@ -38,10 +38,13 @@ WebAssembly.compileStreaming(fetch('build/gb_rs.wasm'))
         console.log(instance.exports);
         //debugger;
 
-        instance.exports.setup();
 
         let gb = instance.exports.setup();
         let ptr_fb = instance.exports.get_frame_buffer(gb);
+
+        // TODO(yhr0x43): implement getting input data
+        let input_data = 0xFFFF;
+        instance.exports.put_joy_info(gb, input_data);
         
         function draw(timestamp) {
             instance.exports.cycle(gb, 1000000);
