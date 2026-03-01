@@ -9,13 +9,12 @@ pub struct Bus {
     apu: audio::Apu,
 
     joy_p1: u8,
-    action_buttons: u8, // A, B, Select, Start. 0 = Pressed; 1 = Not pressed.
-    direction_buttons: u8, // Right, Left, Up, Down. 0 = Pressed; 1 = Not pressed.
-
-
 }
 
 impl Bus {
+    const ACTION_MASK: u8 = 0x20; // A, B, Select, Start. 0 = Pressed; 1 = Not pressed.  
+    const DIRECTION_MASK: u8 = 0x10; // Right, Left, Up, Down. 0 = Pressed; 1 = Not pressed.
+
     pub const fn new(boot_rom: &[u8; 0x100]) -> Self {
         Bus {
             boot_rom: *boot_rom,
@@ -23,8 +22,6 @@ impl Bus {
             wram: [0; 0x2000],
             apu: audio::Apu::new(),
             joy_p1: 0xFF, 
-            action_buttons: 0x0F,
-            direction_buttons: 0x0F,
         }
     }
 
@@ -38,13 +35,13 @@ impl Bus {
             0xFF10..0xFF40 => self.apu.readByte(addr),
             0xFF00 => {
                 let mut result = self.joy_p1 | 0xC0; // Upper 2 bits always read as 1
-                if self.joy_p1 & 0x10 == 0 { result &= self.action_buttons; }
-                if self.joy_p1 & 0x20 == 0 { result &= self.direction_buttons; }
+                if self.joy_p1 & 0x10 == 0 { result &= Self::ACTION_MASK; }
+                if self.joy_p1 & 0x20 == 0 { result &= Self::DIRECTION_MASK; }
                 result
-                }
             }
             _ => todo!("memory address read {:04X}", addr),
         }
+    }
 
     pub fn write(&mut self, addr: Addr, val: u8) {
         let uaddr: usize = addr.into();
