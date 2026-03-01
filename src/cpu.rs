@@ -362,7 +362,7 @@ impl Cpu {
                 }
             }
         } else {
-            todo!("prefix instruction {:02X}", self.opcode)
+            todo!("prefix instruction [{:04X}] {:02X}", self.pc().get(), self.opcode)
         }
     }
 
@@ -370,6 +370,31 @@ impl Cpu {
         if self.opcode == 0x76 {
             // HALT
             todo!("halt instruction")
+        } else if self.opcode & 0xC0 == 0x40 {
+            // LD r/m8, r/m8
+            match phase {
+                Phase::InstFetch => {
+                    let idx = self.opcode & 0x07;
+                    self.decode_regind8_src(idx)
+                }
+                Phase::ValueReady(src) => {
+                    let idx = self.opcode >> 3 & 0x07;
+                    self.pc().add(1);
+                    self.decode_regind8_dst(idx, src.get8())
+                }
+            }
+        } else if self.opcode == 0xE0 {
+            // LD [a8], A
+            match phase {
+                Phase::InstFetch => {
+                    self.pc().add(1);
+                    Stage::Read(OpdSrc::Mem8(self.pc().get()))
+                }
+                Phase::ValueReady(src) => {
+                    self.pc().add(1);
+                    Stage::Write(OpdDst::Mem8(0xFF00 + (src.get8() as u16), self.a().get()))
+                }
+            }
         } else if self.opcode & 0xCF == 0x01 {
             // LD r16, n16
             match phase {
@@ -382,14 +407,14 @@ impl Cpu {
                 }
             }
         } else if self.opcode & 0xCF == 0x02 {
-            // LD [r16(+/-)], A
+            // LD [r16+-], A
             match phase {
                 Phase::InstFetch => {
                     self.pc().add(1);
                     let idx = self.opcode >> 4;
                     self.decode_regind16_dst(idx, self.a().get())
                 }
-                Phase::ValueReady(_) => unreachable!(),
+                Phase::ValueReady(_) => unreachable!("LD [r16+-], A"),
             }
         } else if self.opcode & 0xF8 == 0xA8 {
             // XOR A, r/m8
@@ -414,9 +439,30 @@ impl Cpu {
                 }
                 Phase::ValueReady(src) => {
                     self.pc().add(1);
-                    let idx = self.opcode & 0x3 | self.opcode >> 3 & 0x1;
+                    let idx = self.opcode >> 3 & 0x7;
                     self.decode_regind8_dst(idx, src.get8())
                 }
+            }
+        } else if self.opcode & 0xC7 == 0x04 {
+            // INC r/m8
+            let idx = self.opcode >> 3 & 0x7;
+            match phase {
+                Phase::InstFetch => {
+                    self.decode_regind8_src(idx)
+                }
+                Phase::ValueReady(src) => {
+                    self.pc().add(1);
+                    self.decode_regind8_dst(idx, src.get8() + 1)
+                }
+            }
+        } else if self.opcode == 0xE2 {
+            // LDH [C], A
+            match phase {
+                Phase::InstFetch => {
+                    self.pc().add(1);
+                    Stage::Write(OpdDst::Mem8(0xFF00 + (self.c().get() as u16), self.a().get()))
+                }
+                _ => unreachable!()
             }
         } else if self.opcode & 0xD7 == 0x00 {
             // JR cc, e8
@@ -443,7 +489,7 @@ impl Cpu {
                 }
             }
         } else {
-            todo!("instruction {:02X}", self.opcode)
+            todo!("instruction [{:04X}] {:02X}\n{:?}", self.pc().get(), self.opcode, self)
         }
     }
 

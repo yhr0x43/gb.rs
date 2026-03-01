@@ -39,14 +39,13 @@ WebAssembly.compileStreaming(fetch('build/gb_rs.wasm'))
         //debugger;
 
         instance.exports.setup();
-        // let ptr_frame_buffer = instance.exports.get_frame_buffer();
-        let ptr_frame_buffer = 0;
 
         let gb = instance.exports.setup();
-        instance.exports.cycle(gb, 1000000);
+        let ptr_fb = instance.exports.get_frame_buffer(gb);
         
         function draw(timestamp) {
-            const pixels = new Uint8ClampedArray(memory.buffer, ptr_frame_buffer, app.width * app.height * 4);
+            instance.exports.cycle(gb, 1000000);
+            const pixels = new Uint8ClampedArray(memory.buffer, ptr_fb, app.width * app.height * 4);
             ctx.putImageData(new ImageData(pixels, app.width, app.height), 0, 0);
             requestAnimationFrame(draw);
         }
