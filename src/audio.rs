@@ -106,7 +106,7 @@ impl Apu {
 
             0xFF24 => self.nr50,
             0xFF25 => self.nr51,
-            0xFF26 => self.nr52,
+            0xFF26 => self.nr52, // Checks which channels are on and playing sound
 
             0xFF30..=0xFF3F => self.wave_pattern_ram[(addr - 0xFF30) as usize],
 
