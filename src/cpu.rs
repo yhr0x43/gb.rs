@@ -3,11 +3,12 @@ use core::fmt;
 use core::ptr;
 
 use crate::bus;
+use crate::*;
 
 extern crate my_proc_macro;
 
 #[repr(transparent)]
-struct Reg<T> {
+pub struct Reg<T> {
     value: UnsafeCell<T>,
 }
 
@@ -128,7 +129,6 @@ enum OpdSrc {
 
 #[derive(Debug, Clone, Copy)]
 enum OpdDst {
-    None,
     Mem8(bus::Addr, u8),
     Mem16(bus::Addr, u16),
     Mem16Half(bus::Addr, u8),
@@ -158,7 +158,7 @@ impl OpdSrc {
 impl OpdDst {
     pub fn write_step(&self, bus: &mut bus::Bus) -> OpdDst {
         match self {
-            OpdDst::None | OpdDst::Done => *self,
+            OpdDst::Done => *self,
             OpdDst::Mem8(addr, val) => {
                 bus.write(*addr, *val);
                 OpdDst::Done
@@ -176,7 +176,7 @@ impl OpdDst {
 
     pub fn ready(&self) -> bool {
         match self {
-            OpdDst::None | OpdDst::Done => true,
+            OpdDst::Done => true,
             _ => false,
         }
     }
@@ -191,9 +191,18 @@ enum Stage {
     Write(OpdDst),
 }
 
+impl Stage {
+    fn wait(&self) -> Stage {
+        if let Stage::Wait(dst) = self {
+            Stage::Write(*dst)
+        } else {
+            unreachable!("attempt to wait in invalid stage");
+        }
+    }
+}
+
 #[derive(Debug)]
 enum ReadVal {
-    None,
     Done8(u8),
     Done16(u16),
 }
@@ -233,6 +242,7 @@ enum Phase {
     ValueReady(ReadVal),
 }
 
+#[derive(Debug)]
 enum FlagBit {
     Z = 0x80,
     N = 0x40,
@@ -269,7 +279,7 @@ impl Cpu {
     my_proc_macro::reg16!(bc de hl af sp pc);
     my_proc_macro::reg8!(b c d e h l a f);
 
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Cpu {
             regs: [0; 6],
             opcode: 0, /* TODO(yhr0x43): starting opcode? */
@@ -304,12 +314,34 @@ impl Cpu {
         })
     }
 
-    fn decode_regind8(&self, idx: u8) -> OpdSrc {
-        if idx == 6 {
+    fn decode_regind8_src(&self, idx: u8) -> Stage {
+        Stage::Read(if idx == 6 {
             OpdSrc::Mem8(self.hl().get())
         } else {
             OpdSrc::Done8(self.r8(RegId8::decode(idx)).get())
+        })
+    }
+
+    fn decode_regind8_dst(&self, idx: u8, val: u8) -> Stage {
+        if idx == 6 {
+            Stage::Write(OpdDst::Mem8(self.hl().get(), val))
+        } else {
+            self.r8(RegId8::decode(idx)).set(val);
+            Stage::Fetch
         }
+    }
+
+    fn decode_regind16_dst(&self, idx: u8, val: u8) -> Stage {
+        Stage::Write(OpdDst::Mem8(
+            match idx {
+                0 => self.bc().get(),
+                1 => self.de().get(),
+                2 => self.hl().add(1),
+                3 => self.hl().sub(1),
+                _ => unreachable!("invalid reg indirect idx"),
+            },
+            val,
+        ))
     }
 
     fn inst_prefix_step(&self, phase: Phase) -> Stage {
@@ -317,12 +349,12 @@ impl Cpu {
             // BIT n3, r/m8
             match phase {
                 Phase::InstFetch => {
-                    let idx = self.opcode & 0x3;
-                    Stage::Read(self.decode_regind8(idx))
+                    let idx = self.opcode & 0x7;
+                    self.decode_regind8_src(idx)
                 }
                 Phase::ValueReady(src) => {
-                    let offset = (self.opcode >> 2) & 0x3;
-                    self.flag_set(FlagBit::Z, (src.get8() & (1 << offset)) == 0);
+                    let offset = (self.opcode >> 3) & 0x7;
+                    self.flag_set(FlagBit::Z, (src.get8() & (1u8 << offset)) == 0);
                     self.flag_set(FlagBit::N, false);
                     self.flag_set(FlagBit::H, true);
                     self.pc().add(1);
@@ -354,16 +386,8 @@ impl Cpu {
             match phase {
                 Phase::InstFetch => {
                     self.pc().add(1);
-                    Stage::Write(OpdDst::Mem8(
-                        match self.opcode >> 4 {
-                            0 => self.bc().get(),
-                            1 => self.de().get(),
-                            2 => self.hl().add(1),
-                            3 => self.hl().sub(1),
-                            _ => unreachable!("invalid reg indirect idx"),
-                        },
-                        self.a().get(),
-                    ))
+                    let idx = self.opcode >> 4;
+                    self.decode_regind16_dst(idx, self.a().get())
                 }
                 Phase::ValueReady(_) => unreachable!(),
             }
@@ -372,7 +396,7 @@ impl Cpu {
             match phase {
                 Phase::InstFetch => {
                     let idx = self.opcode & 0x07;
-                    Stage::Read(self.decode_regind8(idx))
+                    self.decode_regind8_src(idx)
                 }
                 Phase::ValueReady(src) => {
                     self.a().xor(src.get8());
@@ -381,13 +405,42 @@ impl Cpu {
                     Stage::Fetch
                 }
             }
+        } else if self.opcode & 0xC7 == 0x06 {
+            // LD r/m8, n8
+            match phase {
+                Phase::InstFetch => {
+                    self.pc().add(1);
+                    Stage::Read(OpdSrc::Mem8(self.pc().get()))
+                }
+                Phase::ValueReady(src) => {
+                    self.pc().add(1);
+                    let idx = self.opcode & 0x3 | self.opcode >> 3 & 0x1;
+                    self.decode_regind8_dst(idx, src.get8())
+                }
+            }
         } else if self.opcode & 0xD7 == 0x00 {
             // JR cc, e8
             match phase {
                 Phase::InstFetch => {
-                    todo!("")
+                    self.pc().add(1);
+                    Stage::Read(OpdSrc::Mem8(self.pc().get()))
                 }
-                _ => { unreachable!() }
+                Phase::ValueReady(src) => {
+                    let flag = (if (self.opcode & 0x01) == 0x01 {
+                        FlagBit::C
+                    } else {
+                        FlagBit::Z
+                    }) as u8;
+                    let cond = self.f().get() & flag == 0;
+                    let neg = self.opcode & 0x80 == 0;
+                    if cond == neg {
+                        self.pc().add((src.get8() as i8) as u16 + 1);
+                        Stage::Write(OpdDst::Done)
+                    } else {
+                        self.pc().add(1);
+                        Stage::Fetch
+                    }
+                }
             }
         } else {
             todo!("instruction {:02X}", self.opcode)

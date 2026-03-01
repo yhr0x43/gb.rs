@@ -10,7 +10,7 @@ use proc_macro::TokenStream;
 pub fn reg8(item: TokenStream) -> TokenStream {
     TokenStream::from_iter(item.into_iter().map(|t| {
         format!(
-            "const fn {}(&self) -> &Reg<u8> {{ self.r8(RegId8::{}) }}",
+            "pub const fn {}(&self) -> &Reg<u8> {{ self.r8(RegId8::{}) }}",
             t.to_string(),
             t.to_string().to_uppercase()
         )
@@ -23,7 +23,7 @@ pub fn reg8(item: TokenStream) -> TokenStream {
 pub fn reg16(item: TokenStream) -> TokenStream {
     TokenStream::from_iter(item.into_iter().map(|t| {
         format!(
-            "const fn {}(&self) -> &Reg<u16> {{ self.r16(RegId16::{}) }}",
+            "pub const fn {}(&self) -> &Reg<u16> {{ self.r16(RegId16::{}) }}",
             t.to_string(),
             t.to_string().to_uppercase()
         )

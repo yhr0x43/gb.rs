@@ -7,7 +7,7 @@ pub struct Bus {
 }
 
 impl Bus {
-    pub fn new(boot_rom: &[u8; 0x100]) -> Self {
+    pub const fn new(boot_rom: &[u8; 0x100]) -> Self {
         Bus {
             boot_rom: *boot_rom,
             vram: [0; 0x2000],

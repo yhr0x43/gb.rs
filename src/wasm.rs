@@ -1,6 +1,6 @@
 use core::panic::PanicInfo;
 use core::fmt::{Arguments, Write, Error};
-use core::ptr::copy_nonoverlapping;
+use core::ptr;
 
 
 unsafe extern "C" {
@@ -33,13 +33,13 @@ impl Write for WasmWriter {
         while self.len + src.len() > self.buf.len() {
             let usable = self.buf.len() - self.len;
             unsafe {
-                copy_nonoverlapping(src.as_ptr(), self.buf.as_mut_ptr().add(self.len), usable);
+                ptr::copy_nonoverlapping(src.as_ptr(), self.buf.as_mut_ptr().add(self.len), usable);
             }
             self.flush();
             src = &src[usable..];
         }
         unsafe {
-            copy_nonoverlapping(src.as_ptr(), self.buf.as_mut_ptr().add(self.len), src.len());
+            ptr::copy_nonoverlapping(src.as_ptr(), self.buf.as_mut_ptr().add(self.len), src.len());
         }
         self.len += src.len();
         Ok(())

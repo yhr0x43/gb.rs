@@ -5,40 +5,43 @@ mod cpu;
 mod wasm;
 
 mod bootrom;
+
 use crate::wasm::*;
 
+pub struct GB {
+    cpu: cpu::Cpu,
+    bus: bus::Bus,
+    tick: u128,
+}
 
-fn emu_run(boot_rom: &[u8; 0x100]) {
-    wrap_wasm_log(&format_args!("emulator starting!"));
-
-    let mut ticks: u64 = 0;
-    let mut cpu = cpu::Cpu::new();
-    let mut bus = bus::Bus::new(boot_rom);
-    let mut running = true;
-
-    while running {
-        cpu.cycle(&mut bus);
-        println!("{ticks:3}: {cpu:?}");
-        ticks += 1;
-        if ticks > 20 {
-            running = false;
+impl GB {
+    pub const fn new() -> GB {
+        GB {
+            cpu: cpu::Cpu::new(),
+            bus: bus::Bus::new(&bootrom::DATA),
+            tick: 0,
         }
     }
 }
 
-pub fn setup() {
-}
-
-pub fn cycle() {
-}
-
+static mut GB_INSTANCE: GB = GB::new();
 
 #[unsafe(no_mangle)]
-pub fn main() {
-    emu_run(&bootrom::DATA);
+pub fn setup() -> *mut GB {
+    println!("emulator starting!");
+    &raw mut GB_INSTANCE as *mut GB
 }
 
 #[unsafe(no_mangle)]
-pub fn panic() {
-    panic!("no")
+pub fn cycle(gb: *mut GB, count: usize) {
+    unsafe {
+        let gb = &mut *gb;
+        for _ in 0..count {
+            gb.cpu.cycle(&mut gb.bus);
+            //println!("{ticks:3}: {cpu:?}");
+            if gb.cpu.hl().get() < 0x8003 {
+                println!("{}: {:?}", gb.tick, gb.cpu);
+            }
+        }
+    }
 }
