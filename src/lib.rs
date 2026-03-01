@@ -4,15 +4,22 @@ mod audio;
 mod bootrom;
 mod bus;
 mod cpu;
+mod graphic;
 #[macro_use]
 mod wasm;
 
 use crate::wasm::*;
 
+const FRAME_WIDTH: usize = 144;
+const FRAME_HEIGHT: usize = 160;
+// Web API ImageData assumes 8-bit RGBA in Uint8ClampedArray
+// thus buffersize is pixel count time 4
+const FRAME_BUFFER_SIZE: usize = FRAME_WIDTH * FRAME_HEIGHT * 4;
+
 pub struct GB {
     cpu: cpu::Cpu,
     bus: bus::Bus,
-    frame_buf: [u8; 160 * 144 * 4],
+    frame_buf: [u8; FRAME_BUFFER_SIZE],
     tick: u128,
 }
 
@@ -20,8 +27,8 @@ impl GB {
     pub const fn new() -> GB {
         GB {
             cpu: cpu::Cpu::new(),
-            bus: bus::Bus::new(&bootrom::DATA),
-            frame_buf: [0; 160 * 144 * 4],
+            bus: bus::Bus::new(&bootrom::DMG0),
+            frame_buf: [0; FRAME_BUFFER_SIZE],
             tick: 0,
         }
     }
@@ -47,7 +54,7 @@ pub fn cycle(gb: *mut GB, count: usize) {
         let gb = &mut *gb;
         for _ in 0..count {
             gb.cpu.cycle(&mut gb.bus);
-            if gb.cpu.pc().get() > 0xB {
+            if gb.cpu.pc().get() > 0x20 {
                 println!("{}: {:?}", gb.tick, gb.cpu);
             }
             gb.tick += 1;
