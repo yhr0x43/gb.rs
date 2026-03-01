@@ -43,7 +43,7 @@ WebAssembly.compileStreaming(fetch('build/gb_rs.wasm'))
         let ptr_fb = instance.exports.get_frame_buffer(gb);
 
         // TODO(yhr0x43): implement getting input data
-        let input_data = 0xFFFF;
+        let input_data = 0xFF;
         instance.exports.put_joy_info(gb, input_data);
         
         function draw(timestamp) {

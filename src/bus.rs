@@ -15,7 +15,6 @@ pub struct Bus {
 impl Bus {
     const ACTION_MASK: u8 = 0x20; // A, B, Select, Start. 0 = Pressed; 1 = Not pressed.
     const DIRECTION_MASK: u8 = 0x10; // Right, Left, Up, Down. 0 = Pressed; 1 = Not pressed.
-
     pub const fn new(boot_rom: &[u8; 0x100]) -> Self {
         Bus {
             boot_rom: *boot_rom,
@@ -26,6 +25,10 @@ impl Bus {
             joy_sel: 0xFF,
 
         }
+    }
+
+    pub fn write_joystate(&mut self, state: u8) {
+        self.joy_state = state;
     }
 
     pub fn read(&self, addr: Addr) -> u8 {

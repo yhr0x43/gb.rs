@@ -60,6 +60,6 @@ pub fn cycle(gb: *mut GB, count: usize) {
 pub fn put_joy_info(gb: *mut GB, info: usize) {
     unsafe {
         let gb = &mut *gb;
-        gb.bus.joy_state = info; // TODO(yhr0x43): ????
+        gb.bus.write_joystate(info as u8); // TODO(yhr0x43): ????
     }
 }
