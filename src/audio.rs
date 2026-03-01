@@ -30,7 +30,7 @@ pub struct Apu {
 }
 
 impl Apu { 
-    pub fn new () -> Self {
+    pub const fn new () -> Self {
         Apu {
             nr10: 0, nr11: 0, nr12: 0, nr13: 0, nr14: 0,
             nr21: 0, nr22: 0, nr23: 0, nr24: 0,

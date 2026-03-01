@@ -1,10 +1,11 @@
 #![no_std]
+
+mod audio;
 mod bus;
+mod bootrom;
 mod cpu;
 #[macro_use]
 mod wasm;
-
-mod bootrom;
 
 use crate::wasm::*;
 
