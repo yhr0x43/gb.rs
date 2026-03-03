@@ -254,11 +254,13 @@ enum Phase {
 }
 
 #[derive(Debug)]
-enum FlagBit {
-    Z = 0x80,
-    N = 0x40,
-    H = 0x20,
-    C = 0x10,
+struct FlagBit(u8);
+
+impl FlagBit {
+    const Z: u8 = 0x80;
+    const N: u8 = 0x40;
+    const H: u8 = 0x20;
+    const C: u8 = 0x10;
 }
 
 pub struct Cpu {
@@ -299,12 +301,9 @@ impl Cpu {
         }
     }
 
-    fn flag_set(&self, fb: FlagBit, val: bool) -> u8 {
-        if val {
-            self.f().replace((fb as u8) | self.f().get())
-        } else {
-            self.f().replace(!(fb as u8) & self.f().get())
-        }
+    fn flag_set(&self, preserve: u8, val: u8) {
+        let oldval = self.f().get();
+        self.f().replace(oldval & preserve | val & !preserve);
     }
 
     const fn r16(&self, id: RegId16) -> &Reg<u16> {
@@ -343,17 +342,14 @@ impl Cpu {
     }
 
     fn decode_regind16_src(&self, idx: u8) -> Stage {
-        Stage::Read(OpdSrc::Mem8(
-            match idx {
-                0 => self.bc().get(),
-                1 => self.de().get(),
-                2 => self.hl().add(1),
-                3 => self.hl().sub(1),
-                _ => unreachable!("invalid reg indirect 16 idx"),
-            },
-        ))
+        Stage::Read(OpdSrc::Mem8(match idx {
+            0 => self.bc().get(),
+            1 => self.de().get(),
+            2 => self.hl().add(1),
+            3 => self.hl().sub(1),
+            _ => unreachable!("invalid reg indirect 16 idx"),
+        }))
     }
-
 
     fn decode_regind16_dst(&self, idx: u8, val: u8) -> Stage {
         Stage::Write(OpdDst::Mem8(
@@ -387,6 +383,28 @@ impl Cpu {
         Stage::Write(OpdDst::Done)
     }
 
+    fn alu(&self, opd2: u8, sub: bool, carry: bool, write: bool) {
+        let carry = if carry { self.f().get() >> 3 } else { 0 };
+        let opd1 = self.a().get();
+        let opd2 = if sub { !opd2 + 1 } else { opd2 };
+        let dst = opd1 as u16 + opd2 as u16;
+
+        let z = dst == 0;
+        let h = ((opd1 & 0xF) + (opd2 & 0xF) + carry) & 0x10 == 0x10;
+        let n = sub;
+        let c = (dst & 0x100 == 0x100) == !sub;
+        if write {
+            self.a().set((dst & 0xFF) as u8)
+        }
+        self.flag_set(
+            0,
+            (if z { FlagBit::Z } else { 0 })
+                | (if h { FlagBit::H } else { 0 })
+                | (if n { FlagBit::N } else { 0 })
+                | (if c { FlagBit::C } else { 0 }),
+        );
+    }
+
     fn inst_prefix_step(&self, phase: Phase) -> Stage {
         if self.opcode & 0xC0 == 0x40 {
             // BIT n3, r/m8
@@ -397,9 +415,8 @@ impl Cpu {
                 }
                 Phase::ValueReady(src) => {
                     let offset = (self.opcode >> 3) & 0x7;
-                    self.flag_set(FlagBit::Z, (src.get8() & (1u8 << offset)) == 0);
-                    self.flag_set(FlagBit::N, false);
-                    self.flag_set(FlagBit::H, true);
+                    let z = (src.get8() & (1u8 << offset)) == 0;
+                    self.flag_set(FlagBit::C, if z { FlagBit::Z } else { 0 } | FlagBit::H);
                     self.pc().add(1);
                     Stage::Fetch
                 }
@@ -448,7 +465,7 @@ impl Cpu {
                 Phase::InstFetch => {
                     self.pc().add(1);
                     Stage::Read(OpdSrc::Mem16(self.pc().get()))
-                },
+                }
                 Phase::ValueReady(src) => {
                     let idx = self.opcode >> 4;
                     self.r16(RegId16::decode(idx)).set(src.get16());
@@ -488,8 +505,20 @@ impl Cpu {
                 }
                 Phase::ValueReady(src) => {
                     self.a().xor(src.get8());
-                    self.f().set(0);
-                    self.flag_set(FlagBit::Z, self.a().get() == 0);
+                    self.flag_set(0, if self.a().get() == 0 { FlagBit::Z } else { 0 });
+                    self.pc().add(1);
+                    Stage::Fetch
+                }
+            }
+        } else if self.opcode & 0xF8 == 0xB8 {
+            // CP A, r/m8
+            match phase {
+                Phase::InstFetch => {
+                    let idx = self.opcode & 0x07;
+                    self.decode_regind8_src(idx)
+                }
+                Phase::ValueReady(src) => {
+                    self.alu(src.get8(), true, false, false);
                     self.pc().add(1);
                     Stage::Fetch
                 }
@@ -511,9 +540,7 @@ impl Cpu {
             // INC r/m8
             let idx = self.opcode >> 3 & 0x7;
             match phase {
-                Phase::InstFetch => {
-                    self.decode_regind8_src(idx)
-                }
+                Phase::InstFetch => self.decode_regind8_src(idx),
                 Phase::ValueReady(src) => {
                     self.pc().add(1);
                     self.decode_regind8_dst(idx, src.get8() + 1)
@@ -523,9 +550,7 @@ impl Cpu {
             // INC r16
             let idx = self.opcode >> 4 & 0x3;
             match phase {
-                Phase::InstFetch => {
-                    self.decode_reg16_src(idx)
-                }
+                Phase::InstFetch => self.decode_reg16_src(idx),
                 Phase::ValueReady(src) => {
                     self.pc().add(1);
                     self.decode_reg16_dst(idx, src.get16() + 1)
@@ -534,9 +559,7 @@ impl Cpu {
         } else if self.opcode == 0xE2 {
             // LDH [C], A
             match phase {
-                Phase::InstFetch => {
-                    Stage::Read(OpdSrc::Done8(self.a().get()))
-                }
+                Phase::InstFetch => Stage::Read(OpdSrc::Done8(self.a().get())),
                 Phase::ValueReady(src) => {
                     self.pc().add(1);
                     Stage::Write(OpdDst::Mem8(self.c().get().as_hiaddr(), src.get8()))
@@ -559,7 +582,7 @@ impl Cpu {
                     let neg = self.opcode & 0x80 == 0;
                     if cond == neg {
                         self.pc().add((src.get8() as i8) as u16 + 1);
-                        Stage::Write(OpdDst::Done)
+                        Stage::Wait(OpdDst::Done)
                     } else {
                         self.pc().add(1);
                         Stage::Fetch
@@ -576,7 +599,7 @@ impl Cpu {
                 Phase::ValueReady(src) => {
                     self.pc().add(1);
                     self.sp().sub(2);
-                    Stage::Write(OpdDst::Mem16(self.sp().get(), src.get16()))
+                    Stage::Wait(OpdDst::Mem16(self.sp().get(), src.get16()))
                 }
             }
         } else {
@@ -620,6 +643,7 @@ impl Cpu {
         if let Stage::Read(src) = self.stage {
             if !memop {
                 let src = src.read_step(bus);
+                memop = true;
                 if src.ready() {
                     self.stage = if self.prefixed {
                         self.inst_prefix_step(Phase::ValueReady(src.into()))
