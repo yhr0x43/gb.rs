@@ -1,6 +1,10 @@
 use crate::bus;
+use crate::gb;
+
 
 pub struct Ppu {
+    pub frame_buffer: [u8; gb::FRAME_BUFFER_SIZE],
+
     vram: [u8; 0x2000], // 8000..9FFF
     oam: [u8; 0xA0],    // FE00..FE9F
     rlcd: [u8; 0x6],    // FF40..FF46
@@ -10,6 +14,7 @@ pub struct Ppu {
 impl Ppu {
     pub const fn new() -> Ppu {
         Ppu {
+            frame_buffer: [0; gb::FRAME_BUFFER_SIZE],
             vram: [0; 0x2000],
             oam: [0; 0xA0],
             rlcd: [0; 0x6],
