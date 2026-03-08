@@ -4,20 +4,13 @@ SRCDIR := src
 DSTDIR := build
 
 CRATE_FLAGS := --crate-name $(CRATE_NAME) --edition=2024 --crate-type cdylib
-CODEGEN_FLAGS := --emit=dep-info,link,mir -C embed-bitcode=no --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values())'
-RELEASE_FLAGS := -C opt-level=s -C strip=debuginfo
-DEBUG_FLAGS := -C opt-level=s -C debuginfo=2
+CODEGEN_FLAGS := --emit=dep-info,link -C opt-level=z -C panic=abort
 
 RUSTC_TARGET := --target wasm32-unknown-unknown
 #RUSTC_TARGET := --target wasm32v1-none
 
 RUSTC_FLAGS := $(CRATE_FLAGS) $(CODEGEN_FLAGS) $(RUSTC_TARGET)
 
-ifdef RELEASE
-    RUSTC_FLAGS += $(RELEASE_FLAGS)
-else
-    RUSTC_FLAGS += $(DEBUG_FLAGS)
-endif
 
 WASM_OBJ := $(DSTDIR)/$(CRATE_NAME).wasm
 # TODO(yhr0x43): architecture dependent proc_macro artifact
