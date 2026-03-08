@@ -4,11 +4,98 @@
         <title>GB in Rust WebAssembly</title>
         <link rel="icon" href="data:image/png;base64,iVBORw0KGgo=">
         <style>
-         body { background-color: #00233f; }
+         body { background-color: #020137; color: #d6d6d6; }
         </style>
     </head>
     <body>
+        <label for="bootrom">Choose a bootrom:</label>
+        <input type="file" id="bootrom" name="bootrom" accept="application/octet-stream" />
+        <label for="gamerom">Choose a Game Rom:</label>
+        <input type="file" id="gamerom" name="gamerom" accept="application/x-gameboy-rom" />
+        <input type="button" id="pause" name="pause" value="Pause" disabled />
         <canvas id="app" width ="160" height="144"></canvas>
-        <script src="loader.js"></script>
+        <script>
+         const app = document.getElementById("app");
+         const ctx = app.getContext("2d");
+
+         const bootromInput = document.getElementById("bootrom");
+
+         const encoder = new TextEncoder('utf-8');
+         const decoder = new TextDecoder('utf-8');
+
+         let ready = 0;
+         let memory = undefined;
+
+         let bootrom = fetch('dmg.bin').then(response => response.bytes());
+         let gamerom = fetch(encodeURI('Pocket\ Monsters\ -\ Red\ Version\ \(J\)\ \(V1.0\)\ \[S\].gb')).then(response => response.bytes());
+
+         WebAssembly
+             .compileStreaming(fetch('build/gb_rs.wasm'))
+             .then(module => {
+                 return WebAssembly.instantiate(module, {
+                     env: new Proxy({
+                         wasm_log: (ptr, len) => {
+                             console.log(decoder.decode(new Uint8Array(memory.buffer, Number(ptr), Number(len))));
+                         },
+                     }, {
+                         get(target, prop, _) {
+                             return prop in target ? target[prop] : (...args) => console.error("NOT IMPLEMENTED: " + prop, args);
+                         },
+                     })
+                 });
+             })
+             .then(async instance => {
+                 memory = instance.exports.memory;
+                 console.log(instance.exports);
+
+                 let gb = instance.exports.gb_get();
+
+                 const pause_btn = document.getElementById("pause");
+                 let paused = false;
+                 pause_btn.addEventListener('click', (ev) => {
+                     paused = !paused;
+                     instance.exports.pause(gb, paused);
+                 });
+                 pause_btn.disabled = false;
+
+                 let bootrom_ptr = instance.exports.get_bootrom_ptr(gb);
+                 let gamerom_ptr = instance.exports.get_gamerom_ptr(gb);
+                 let frame_buffer_ptr = instance.exports.get_frame_buffer_ptr(gb);
+                 
+                 (new Uint8Array(memory.buffer, bootrom_ptr, 0x100)).set(await bootrom);
+                 (new Uint8Array(memory.buffer, gamerom_ptr, 0x80000)).set(await gamerom);
+
+                 let lastTs;
+                 function draw(timestamp) {
+                     const delta = timestamp - lastTs;
+                     timestamp = lastTs;
+                     // TODO(yhr0x43): implement getting input data
+                     /* let input_data = 0xFF;
+                      * instance.exports.put_joy_info(gb, input_data); */
+
+                     /* TODO(yhr0x43): fixed point cycle computation */
+                     /* cycle speed is 2^20Hz, (2^20/(2*10^5))=(2^14/5^3) cycle/5µs */
+                     /* DOMHighResTimeStamp should be accurate to 5µs, thus the fixed-point math */
+                     /* const delta5us = Math.round(delta * 200); */
+                     instance.exports.run_cycles(gb, Math.round(delta * 1048.576));
+
+                     ctx.putImageData(
+                         new ImageData(
+                             new Uint8ClampedArray(
+                                 memory.buffer,
+                                 frame_buffer_ptr,
+                                 app.width * app.height * 4
+                             ),
+                             app.width,
+                             app.height),
+                         0, 0);
+                     requestAnimationFrame(draw);
+                 }
+
+                 lastTs = document.timeline.currentTime;
+                 requestAnimationFrame(draw);
+
+             });
+        </script>
     </body>
 </html>
