@@ -1,72 +1,50 @@
 #![no_std]
 
 mod audio;
-mod bootrom;
 mod bus;
+mod cart;
 mod cpu;
+mod gb;
 mod graphic;
 #[macro_use]
 mod wasm;
 
 use crate::wasm::*;
 
-const FRAME_WIDTH: usize = 144;
-const FRAME_HEIGHT: usize = 160;
-// Web API ImageData assumes 8-bit RGBA in Uint8ClampedArray
-// thus buffersize is pixel count time 4
-const FRAME_BUFFER_SIZE: usize = FRAME_WIDTH * FRAME_HEIGHT * 4;
-
-pub struct GB {
-    cpu: cpu::Cpu,
-    bus: bus::Bus,
-    frame_buf: [u8; FRAME_BUFFER_SIZE],
-    tick: u128,
-}
-
-impl GB {
-    pub const fn new() -> GB {
-        GB {
-            cpu: cpu::Cpu::new(),
-            bus: bus::Bus::new(&bootrom::DMG0),
-            frame_buf: [0; FRAME_BUFFER_SIZE],
-            tick: 0,
-        }
-    }
-}
-
-static mut GB_INSTANCE: GB = GB::new();
+static mut GB_SINGLETON: gb::GB = gb::GB::new();
 
 #[unsafe(no_mangle)]
-pub fn setup() -> *mut GB {
-    println!("emulator starting!");
-    &raw mut GB_INSTANCE as *mut GB
+pub fn gb_get() -> *mut gb::GB {
+    println!("fetched GB instance");
+    &raw mut GB_SINGLETON
 }
 
 #[unsafe(no_mangle)]
-pub fn get_frame_buffer(gb: *mut GB) -> *mut [u8] {
-    unsafe { &raw mut (&mut *gb).frame_buf }
+pub fn get_frame_buffer_ptr(gb: &gb::GB) -> *const u8 {
+    gb.bus.ppu.frame_buffer.as_ptr()
 }
 
-
 #[unsafe(no_mangle)]
-pub fn cycle(gb: *mut GB, count: usize) {
-    unsafe {
-        let gb = &mut *gb;
-        for _ in 0..count {
-            gb.cpu.cycle(&mut gb.bus);
-            if gb.cpu.pc().get() > 0x20 {
-                println!("{}: {:?}", gb.tick, gb.cpu);
-            }
-            gb.tick += 1;
-        }
-    }
+pub fn get_bootrom_ptr(gb: &mut gb::GB) -> *const u8 {
+    gb.bus.bootrom.as_ptr()
 }
 
+#[unsafe(no_mangle)]
+pub fn get_gamerom_ptr(gb: &mut gb::GB) -> *const u8 {
+    gb.bus.cart.rom_image.as_ptr()
+}
 
 #[unsafe(no_mangle)]
-pub fn put_joy_info(gb: *mut GB, info: usize) {
-    unsafe {
-        let gb = &mut *gb;
-        gb.bus.write_joystate(info as u8); // TODO(yhr0x43): ????
-    }
+pub fn run_cycles(gb: &mut gb::GB, count: usize) {
+    let _ = (0..count).try_for_each(|_| gb.cycle());
+}
+
+#[unsafe(no_mangle)]
+pub fn pause(gb: &mut gb::GB, val: i32) {
+    gb.paused = val != 0;
+}
+
+#[unsafe(no_mangle)]
+pub fn write_button_state(gb: &mut gb::GB, info: usize) {
+    gb.write_button_state(info as u8); // TODO(yhr0x43): ????
 }

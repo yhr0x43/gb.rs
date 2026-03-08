@@ -5,17 +5,16 @@ use core::ptr;
 
 unsafe extern "C" {
     pub fn wasm_log(ptr: *const u8, len: usize);
-    pub fn wasm_never(exit_code: usize) -> !;
 }
 
 struct WasmWriter {
-    buf: [u8; 0x200],
+    buf: [u8; 0x100],
     len: usize,
 }
 
 impl WasmWriter {
     pub fn new() -> Self {
-        WasmWriter { buf: [0; 0x200], len: 0 }
+        WasmWriter { buf: [0; 0x100], len: 0 }
     }
 
     pub fn flush(&mut self) {
@@ -64,5 +63,5 @@ fn wasm_panic(info: &PanicInfo) -> ! {
         write!(w, "panic formatting failure").unwrap_or(());
     });
     w.flush();
-    unsafe { wasm_never(0) }
+    core::arch::wasm32::unreachable()
 }
