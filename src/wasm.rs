@@ -17,7 +17,7 @@ impl WasmWriter {
         WasmWriter { buf: [0; 0x100], len: 0 }
     }
 
-    pub fn flush(&mut self) {
+    fn flush(&mut self) {
         unsafe {
             wasm_log(self.buf.as_ptr(), self.len);
         }
@@ -25,8 +25,13 @@ impl WasmWriter {
     }
 }
 
+impl Drop for WasmWriter {
+    fn drop(&mut self) {
+        self.flush();
+    }
+}
+
 impl Write for WasmWriter {
-    // Required method
     fn write_str(&mut self, s: &str) -> Result<(), Error> {
         let mut src = s;
         while self.len + src.len() > self.buf.len() {
@@ -45,10 +50,11 @@ impl Write for WasmWriter {
     }
 }
 
+
+
 pub fn wrap_wasm_log(value: &Arguments) {
     let mut w = WasmWriter::new();
     write!(&mut w, "{}", value).unwrap();
-    w.flush();
 }
 
 #[macro_export]
@@ -62,6 +68,6 @@ fn wasm_panic(info: &PanicInfo) -> ! {
     write!(w, "{}", info).unwrap_or_else(|_| {
         write!(w, "panic formatting failure").unwrap_or(());
     });
-    w.flush();
+    drop(w);
     core::arch::wasm32::unreachable()
 }
