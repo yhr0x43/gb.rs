@@ -5,19 +5,19 @@ use crate::bus::Bus;
 
 use crate::*;
 
-pub(crate) const FRAME_WIDTH: usize = 144;
-pub(crate) const FRAME_HEIGHT: usize = 160;
+pub(crate) const FRAME_WIDTH: usize = 160;
+pub(crate) const FRAME_HEIGHT: usize = 144;
 // FRAME_BUFFER has data in 8-bit RGBA format
 // thus buffersize is pixel count time 4
 // chosen to better interop with WebAPI ImageData
 // which assumes 8-bit RGBA in Uint8ClampedArray
-pub(crate) const FRAME_BUFFER_SIZE: usize = FRAME_WIDTH * FRAME_HEIGHT * 4;
+pub(crate) const FRAME_BUFFER_SIZE: usize = gb::FRAME_WIDTH * gb::FRAME_HEIGHT * 4;
 
 pub(crate) const MAX_CART_ROM_SIZE: usize = 0x800000;
 
 pub struct GB {
     pub(crate) bus: Bus,
-    cpu: Cpu,
+    pub(crate) cpu: Cpu,
     tick: u128,
 
     pub(crate) paused: bool,
@@ -46,10 +46,15 @@ impl GB {
             return ControlFlow::Break(());
         }
 
-        println!("{}: {:?}", self.tick, self.cpu);
-        if self.tick > 200000 {
-            self.paused = true;
+        self.bus.ppu.cycle();
+
+        if matches!(self.tick, 82880..82900) {
+            println!("{}: {:?}, lcdc: {:02X}", self.tick, self.cpu, self.bus.read(0xFF40));
         }
+
+        // if self.tick > 200000 {
+        //     self.paused = true;
+        // }
 
         // if self.cpu.pc().get() > 0x10 {
         //     println!("{}: {:?}", self.tick, self.cpu);

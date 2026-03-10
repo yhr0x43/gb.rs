@@ -6,6 +6,7 @@ mod cart;
 mod cpu;
 mod gb;
 mod graphic;
+mod reg;
 #[macro_use]
 mod wasm;
 
@@ -35,13 +36,20 @@ pub fn get_gamerom_ptr(gb: &mut gb::GB) -> *const u8 {
 }
 
 #[unsafe(no_mangle)]
-pub fn run_cycles(gb: &mut gb::GB, count: usize) {
+pub fn run_frame(gb: &mut gb::GB, count: usize) {
     let _ = (0..count).try_for_each(|_| gb.cycle());
+    gb.bus.ppu.put_tile_image();
+}
+
+#[unsafe(no_mangle)]
+pub fn get_tile_image_ptr(gb: &gb::GB) -> *const u8 {
+    gb.bus.ppu.tile_image.as_ptr()
 }
 
 #[unsafe(no_mangle)]
 pub fn pause(gb: &mut gb::GB, val: i32) {
     gb.paused = val != 0;
+    println!("{:?}", gb.cpu);
 }
 
 #[unsafe(no_mangle)]
