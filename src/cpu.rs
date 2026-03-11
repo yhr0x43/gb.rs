@@ -567,7 +567,7 @@ mod inst {
                     Stage::Read(OpdSrc::Mem8(addr))
                 }
                 ReadVal::Done8(val) => {
-                    cpu.pc().inc(1);
+                    cpu.pc().inc(2);
                     cpu.a().set(val);
                     Stage::Fetch
                 }
@@ -709,15 +709,25 @@ mod inst {
                 Stage::Read(OpdSrc::Mem16(cpu.pc().get()))
             }
             Phase::ValueReady(src) => {
-                println!("JP {:04X}", src.get16());
                 cpu.pc().set(src.get16());
                 Stage::Wait(OpdDst::Done)
             }
         }
     }
 
-    fn jpcc(cpu: &Cpu, _phase: Phase) -> Stage {
-        todo!("inst {:?}", cpu)
+    fn jpcc(cpu: &Cpu, phase: Phase) -> Stage {
+        // JP cc, n16
+        match phase {
+            Phase::InstFetch => jp(cpu, phase),
+            Phase::ValueReady(_) => {
+                if cond(cpu.opcode, cpu.f().get()) {
+                    jp(cpu, phase)
+                } else {
+                    cpu.pc().inc(1);
+                    Stage::Fetch
+                }
+            }
+        }
     }
 
     fn jphl(cpu: &Cpu, _phase: Phase) -> Stage {
@@ -1009,12 +1019,14 @@ mod inst {
     }
 
     fn di(cpu: &Cpu, _phase: Phase) -> Stage {
+        // DI
         cpu.ime.set(false);
         cpu.pc().inc(1);
         Stage::Fetch
     }
 
     fn ei(cpu: &Cpu, _phase: Phase) -> Stage {
+        // EI
         cpu.ime_enable.set(ImeSet::Init);
         cpu.pc().inc(1);
         Stage::Fetch
@@ -1188,7 +1200,7 @@ impl Cpu {
             IntrStage::Init(addr) => IntrStage::Wait(addr),
             IntrStage::Wait(addr) => IntrStage::Exec(addr),
             IntrStage::Exec(addr) => {
-                println!("intr from {:04X} to {addr:04X}", self.pc().get());
+                // println!("intr from {:04X} to {addr:04X}", self.pc().get());
                 self.stage = Stage::Read(OpdSrc::Done16(addr));
                 self.instop = inst::INST_TABLE[0xCD]; // call
                 IntrStage::None
@@ -1261,7 +1273,7 @@ impl Cpu {
                     Stage::Write(dst)
                 }
             }
-        }
+        };
 
         true
     }
