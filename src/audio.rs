@@ -76,6 +76,7 @@ impl Apu {
 
             0xFF30..=0xFF3F => self.wave_pattern_ram[(addr - 0xFF30) as usize] = val,
 
+            0xFF10..0xFF40 => { },
             _ => unreachable!("invalid APU register address {:04X}", addr)
         }
     }
@@ -110,6 +111,7 @@ impl Apu {
 
             0xFF30..=0xFF3F => self.wave_pattern_ram[(addr - 0xFF30) as usize],
 
+            0xFF10..0xFF40 => 0xFF,
             _ => unreachable!("invalid APU register address {:04X}", addr)
         }
     }

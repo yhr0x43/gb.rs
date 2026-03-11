@@ -1,12 +1,11 @@
 use crate::bus;
 use crate::gb;
-use crate::*;
 
 pub struct Ppu {
-    pub frame_buffer: [u8; gb::FRAME_BUFFER_SIZE],
+    pub(crate) frame_buffer: [u8; gb::FRAME_BUFFER_SIZE],
     write_pos: usize, // offset into frame_buffer
 
-    pub tile_image: [u8; 0x40000],
+    pub(crate) tile_image: [u8; 0x40000],
 
     hdot: u16, // logical dot (progress) in one hline
 
@@ -20,8 +19,18 @@ pub struct Ppu {
     // memory/registers
     vram: [u8; 0x2000], // 8000..9FFF
     oam: [u8; 0xA0],    // FE00..FE9F
-    rlcd: [u8; 0x6],    // FF40..FF46
-    robj: [u8; 0x5],    // FF47..FF4C
+
+    pub(crate) lcdc: u8,
+    pub(crate) stat: u8,
+    pub(crate) scy: u8,
+    pub(crate) scx: u8,
+    pub(crate) ly: u8,
+    pub(crate) lyc: u8,
+    pub(crate) bgp: u8,
+    pub(crate) obp0: u8,
+    pub(crate) obp1: u8,
+    pub(crate) wx: u8,
+    pub(crate) wy: u8,
 }
 
 impl Ppu {
@@ -33,58 +42,6 @@ impl Ppu {
     const LCDC_OBJ_SIZE: u8 = 0x04;
     const LCDC_OBJ_ENABLE: u8 = 0x02;
     const LCDC_BGWN_PRIO: u8 = 0x01;
-
-    const fn lcdc_mut(&mut self) -> &mut u8 {
-        &mut self.rlcd[0x0]
-    }
-
-    const fn lcdc(&self) -> &u8 {
-        &self.rlcd[0x0]
-    }
-
-    const fn stat(&self) -> &u8 {
-        &self.rlcd[0x1]
-    }
-
-    const fn scy(&self) -> &u8 {
-        &self.rlcd[0x2]
-    }
-
-    const fn scx(&self) -> &u8 {
-        &self.rlcd[0x3]
-    }
-
-    const fn ly(&self) -> &u8 {
-        &self.rlcd[0x4]
-    }
-
-    const fn ly_mut(&mut self) -> &mut u8 {
-        &mut self.rlcd[0x4]
-    }
-
-    const fn lyc(&self) -> &u8 {
-        &self.rlcd[0x5]
-    }
-
-    const fn bgp(&self) -> &u8 {
-        &self.robj[0x0]
-    }
-
-    const fn obp0(&self) -> &u8 {
-        &self.robj[0x1]
-    }
-
-    const fn obp1(&self) -> &u8 {
-        &self.robj[0x2]
-    }
-
-    const fn wx(&self) -> &u8 {
-        &self.robj[0x3]
-    }
-
-    const fn wy(&self) -> &u8 {
-        &self.robj[0x4]
-    }
 
     pub const fn new() -> Ppu {
         Ppu {
@@ -101,11 +58,22 @@ impl Ppu {
 
             vram: [0; 0x2000],
             oam: [0; 0xA0],
-            rlcd: [0; 0x6],
-            robj: [0; 0x5],
+
+            lcdc: 0,
+            stat: 0,
+            scy: 0,
+            scx: 0,
+            ly: 0,
+            lyc: 0,
+            bgp: 0,
+            obp0: 0,
+            obp1: 0,
+            wx: 0,
+            wy: 0,
         }
     }
 
+    // TODO(yhr0x43): memory locking
     pub fn read_vram(&self, addr: bus::Addr) -> u8 {
         self.vram[(addr as usize) - 0x8000]
     }
@@ -122,27 +90,8 @@ impl Ppu {
         self.oam[(addr as usize) - 0xFE00] = val
     }
 
-    // TODO(yhr0x43): memory locking
-    pub fn read_regs(&self, addr: bus::Addr) -> u8 {
-        match addr {
-            0xFF40..0xFF46 => self.rlcd[(addr as usize) - 0xFF40],
-            0xFF46 => todo!("oam dma read"),
-            0xFF47..0xFF4C => self.robj[(addr as usize) - 0xFF47],
-            _ => unreachable!("ppu reg read {:04X}", addr),
-        }
-    }
-
-    pub fn write_regs(&mut self, addr: bus::Addr, val: u8) {
-        match addr {
-            0xFF40..0xFF46 => self.rlcd[(addr as usize) - 0xFF40] = val,
-            0xFF46 => todo!("oam dma write"),
-            0xFF47..0xFF4C => self.robj[(addr as usize) - 0xFF47] = val,
-            _ => unreachable!("ppu reg write {:04X}", addr),
-        }
-    }
-
-    pub fn cycle(&mut self) {
-        if *self.lcdc() & Ppu::LCDC_ENABLE == 0 {
+    pub fn tick(&mut self) {
+        if self.lcdc & Ppu::LCDC_ENABLE == 0 {
             return;
         }
 
@@ -160,7 +109,7 @@ impl Ppu {
         let tile_x = (map_x as usize) / 8;
         let tile_y = (map_y as usize) / 8;
 
-        let map_base = if *self.lcdc() & Ppu::LCDC_BG_MAP == 0 {
+        let map_base = if self.lcdc & Ppu::LCDC_BG_MAP == 0 {
             0x1800
         } else {
             0x1C00
@@ -168,7 +117,7 @@ impl Ppu {
 
         let tile_idx = self.vram[map_base + tile_x + tile_y * 0x20];
 
-        let tile_data = if *self.lcdc() & Ppu::LCDC_TILE_DATA == 0 {
+        let tile_data = if self.lcdc & Ppu::LCDC_TILE_DATA == 0 {
             (0x0800 + (tile_idx.cast_signed() as i16) * 0x10).cast_unsigned()
                 + (map_y as u16 % 8) * 2
         } else {
@@ -184,19 +133,21 @@ impl Ppu {
         self.hdot += 1;
         if self.hdot > 455 {
             self.hdot = 0;
-            let ly = self.ly_mut();
-            *ly += 1;
-            if *ly > 153 {
-                *ly = 0;
+            self.ly += 1;
+            if self.ly > 153 {
+                self.ly = 0;
             }
         }
 
-        if *self.ly() >= gb::FRAME_HEIGHT as u8 {
+        if self.ly >= gb::FRAME_HEIGHT as u8 {
             return;
         }
 
+        let map_x = self.lx.wrapping_add(self.scx);
+        let map_y = self.ly.wrapping_add(self.scy);
+
         if self.hdot < 80 {
-            if *self.lcdc() & Ppu::LCDC_OBJ_ENABLE != 0 {
+            if self.lcdc & Ppu::LCDC_OBJ_ENABLE != 0 {
                 todo!("Object Rendering");
             }
             return;
@@ -204,12 +155,10 @@ impl Ppu {
 
         // begin Mode 3
         if self.hdot == 80 {
-            self.sc3_line = *self.scx() % 8;
+            self.sc3_line = self.scx % 8;
             self.penalty = self.sc3_line;
             self.draw = true;
 
-            let map_x = self.lx.wrapping_add(*self.scx());
-            let map_y = (*self.ly()).wrapping_add(*self.scy());
             self.tile_line = self.fetch_tile(map_x, map_y);
         }
 
@@ -219,10 +168,7 @@ impl Ppu {
         }
 
         if self.draw {
-            let tgt = (self.lx as usize + (*self.ly() as usize) * gb::FRAME_WIDTH) * 4;
-
-            let map_x = self.lx.wrapping_add(*self.scx());
-            let map_y = (*self.ly()).wrapping_add(*self.scy());
+            let tgt = (self.lx as usize + self.ly as usize * gb::FRAME_WIDTH) * 4;
 
             if map_x % 8 == 0 {
                 self.tile_line = self.fetch_tile(map_x, map_y);
@@ -253,23 +199,6 @@ impl Ppu {
             _ => unreachable!(),
         }
     }
-
-    // pub fn put_tile_image(&mut self) {
-    //     for i in 0..0x100 {
-    //         let tile = i * 0x10;
-    //         for y in 0..8 {
-    //             let line = tile + y * 2;
-    //             let cs = Ppu::weave_bits(self.vram[line..line+2].try_into().unwrap());
-    //             for (ic, c) in tile.into_iter().enumerate() {
-    //                 let (r, g, b, a) = Ppu::map_color(c);
-    //                 self.tile_image[(x + y * 0x100) * 4 + 0] = r;
-    //                 self.tile_image[(x + y * 0x100) * 4 + 1] = g;
-    //                 self.tile_image[(x + y * 0x100) * 4 + 2] = b;
-    //                 self.tile_image[(x + y * 0x100) * 4 + 3] = a;
-    //             }
-    //         }
-    //     }
-    // }
 
     pub fn put_tile_image(&mut self) {
         for y in 0..0x100 {

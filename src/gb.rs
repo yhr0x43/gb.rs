@@ -1,7 +1,7 @@
 use core::ops::ControlFlow;
 
-use crate::cpu::Cpu;
 use crate::bus::Bus;
+use crate::cpu::Cpu;
 
 use crate::*;
 
@@ -37,31 +37,40 @@ impl GB {
         todo!("{}", info)
     }
 
-    pub fn cycle(&mut self) -> ControlFlow<()> {
+    pub fn tick(&mut self) -> ControlFlow<()> {
         if self.paused {
             return ControlFlow::Break(());
         }
 
-        if !self.cpu.cycle(&mut self.bus) {
+        if !self.cpu.tick(&mut self.bus) {
             return ControlFlow::Break(());
         }
 
-        self.bus.ppu.cycle();
+        self.bus.ppu.tick();
+        self.bus.apu.tick(0);
+        self.bus.timer.tick(&mut self.bus.intr);
 
-        if matches!(self.tick, 82880..82900) {
-            println!("{}: {:?}, lcdc: {:02X}", self.tick, self.cpu, self.bus.read(0xFF40));
+        self.bus.intr.tick(&mut self.cpu);
+
+        if matches!(self.cpu.pc().get(), 0x0A0E..0x0A89 | 0x0E45..0x0E48)
+            || matches!(self.cpu.sp().get(), 0xDFF9)
+        {
+            println!("{}: {:?}", self.tick, self.cpu);
         }
 
-        // if self.tick > 200000 {
-        //     self.paused = true;
-        // }
-
-        // if self.cpu.pc().get() > 0x10 {
+        // if false && matches!(self.cpu.sp().get(), 0xDFF9) {
         //     println!("{}: {:?}", self.tick, self.cpu);
+        //     println!("{:02X} {:02X} {:02X} {:02X} {:02X} {:02X}",
+        //         self.bus.read(self.cpu.sp().get()),
+        //         self.bus.read(self.cpu.sp().get() + 1),
+        //         self.bus.read(self.cpu.sp().get() + 2),
+        //         self.bus.read(self.cpu.sp().get() + 3),
+        //         self.bus.read(self.cpu.sp().get() + 4),
+        //         self.bus.read(self.cpu.sp().get() + 5)
+        //     );
         // }
-        self.tick += 1;
 
+        self.tick += 1;
         ControlFlow::Continue(())
     }
 }
-

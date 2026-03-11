@@ -1,10 +1,11 @@
 use core::cell::Cell;
 use core::fmt;
+use core::ops::ControlFlow;
 
 use crate::bus;
+use crate::reg::Reg;
 #[allow(unused_imports)]
 use crate::*;
-use crate::reg::Reg;
 
 extern crate my_proc_macro;
 
@@ -23,7 +24,7 @@ enum HiLo {
     Lo,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 #[rustfmt::skip]
 enum RegId8 { B, C, D, E, H, L, A, F }
 
@@ -59,7 +60,7 @@ impl RegId8 {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 #[rustfmt::skip]
 enum RegId16 { BC, DE, HL, AF, SP, PC }
 
@@ -205,36 +206,6 @@ enum Phase {
 }
 
 type InstOp = fn(&Cpu, Phase) -> Stage;
-
-pub struct Cpu {
-    regs: [u16; 6],
-    pub(self) ime: Cell<bool>, /* interrupt master enable */
-    pub(self) stop: Cell<bool>,
-    pub(self) halt: Cell<bool>,
-
-    /* interrupt states */
-    
-    /* sub-instruction M-cycles state */
-    pub(self) opcode: u8, /* executing opcode */
-    pub(self) instop: InstOp,
-    stage: Stage,
-}
-
-impl fmt::Debug for Cpu {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        f.debug_struct("Cpu")
-            .field("BC", &format_args!("{:04X}", self.bc().get()))
-            .field("DE", &format_args!("{:04X}", self.de().get()))
-            .field("HL", &format_args!("{:04X}", self.hl().get()))
-            .field("AF", &format_args!("{:04X}", self.af().get()))
-            .field("SP", &format_args!("{:04X}", self.sp().get()))
-            .field("PC", &format_args!("{:04X}", self.pc().get()))
-            .field("opcode", &format_args!("{:02X}", self.opcode))
-            .field("stage", &self.stage)
-            .finish()
-    }
-}
-
 mod inst {
     use super::cpu::*;
 
@@ -372,11 +343,30 @@ mod inst {
         }
     }
 
-    fn res(cpu: &Cpu, _phase: Phase) -> Stage {
-        todo!("inst {:?}", cpu)
+    fn res(cpu: &Cpu, phase: Phase) -> Stage {
+        // RES n3, r/m8
+        let idx = cpu.opcode & 0x7;
+        match phase {
+            Phase::InstFetch => decode_regind8_src(cpu, idx),
+            Phase::ValueReady(src) => {
+                let offset = (cpu.opcode >> 3) & 0x7;
+                cpu.pc().inc(1);
+                decode_regind8_dst(cpu, idx, src.get8() & !(1 << offset))
+            }
+        }
     }
-    fn set(cpu: &Cpu, _phase: Phase) -> Stage {
-        todo!("inst {:?}", cpu)
+
+    fn set(cpu: &Cpu, phase: Phase) -> Stage {
+        // SET n3, r/m8
+        let idx = cpu.opcode & 0x7;
+        match phase {
+            Phase::InstFetch => decode_regind8_src(cpu, idx),
+            Phase::ValueReady(src) => {
+                let offset = (cpu.opcode >> 3) & 0x7;
+                cpu.pc().inc(1);
+                decode_regind8_dst(cpu, idx, src.get8() | (1 << offset))
+            }
+        }
     }
 
     #[rustfmt::skip]
@@ -537,20 +527,18 @@ mod inst {
         // LDH A, [a8]
         match phase {
             Phase::InstFetch => Stage::Read(OpdSrc::Mem8(cpu.pc().pre_inc(1))),
-            Phase::ValueReady(src) => {
-                match src {
-                    ReadVal::Done8(val) => {
-                        let addr = 0xFF00 | (val as u16);
-                        Stage::Read(OpdSrc::Mem8Ex(addr))
-                    }
-                    ReadVal::Done8Ex(val) => {
-                        cpu.pc().inc(1);
-                        cpu.a().set(val);
-                        Stage::Fetch
-                    }
-                    _ => unreachable!(),
+            Phase::ValueReady(src) => match src {
+                ReadVal::Done8(val) => {
+                    let addr = 0xFF00 | (val as u16);
+                    Stage::Read(OpdSrc::Mem8Ex(addr))
                 }
-            }
+                ReadVal::Done8Ex(val) => {
+                    cpu.pc().inc(1);
+                    cpu.a().set(val);
+                    Stage::Fetch
+                }
+                _ => unreachable!(),
+            },
         }
     }
 
@@ -569,8 +557,23 @@ mod inst {
         }
     }
 
-    fn ldai(cpu: &Cpu, _phase: Phase) -> Stage {
-        todo!("inst {:?}", cpu)
+    fn ldai(cpu: &Cpu, phase: Phase) -> Stage {
+        // LD [a16], A
+        match phase {
+            Phase::InstFetch => Stage::Read(OpdSrc::Mem16(cpu.pc().pre_inc(1))),
+            Phase::ValueReady(src) => match src {
+                ReadVal::Done16(val) => {
+                    let addr = val;
+                    Stage::Read(OpdSrc::Mem8(addr))
+                }
+                ReadVal::Done8(val) => {
+                    cpu.pc().inc(1);
+                    cpu.a().set(val);
+                    Stage::Fetch
+                }
+                _ => unreachable!(),
+            },
+        }
     }
 
     fn ldsphl(cpu: &Cpu, _phase: Phase) -> Stage {
@@ -595,20 +598,20 @@ mod inst {
     }
 
     fn dec16(cpu: &Cpu, phase: Phase) -> Stage {
-        // INC r16
+        // DEC r16
         let idx = cpu.opcode >> 4 & 0x03;
 
         match phase {
             Phase::InstFetch => decode_reg16_src(cpu, idx),
             Phase::ValueReady(src) => {
                 cpu.pc().inc(1);
-                decode_reg16_dst(cpu, idx, src.get16().wrapping_add(1))
+                decode_reg16_dst(cpu, idx, src.get16().wrapping_sub(1))
             }
         }
     }
 
     fn inc8(cpu: &Cpu, phase: Phase) -> Stage {
-        // INC ri8
+        // INC r/m8
         let idx = cpu.opcode >> 3 & 0x7;
         match phase {
             Phase::InstFetch => decode_regind8_src(cpu, idx),
@@ -622,7 +625,7 @@ mod inst {
     }
 
     fn dec8(cpu: &Cpu, phase: Phase) -> Stage {
-        // DEC ri8
+        // DEC r/m8
         let idx = cpu.opcode >> 3 & 0x7;
         match phase {
             Phase::InstFetch => decode_regind8_src(cpu, idx),
@@ -698,8 +701,19 @@ mod inst {
         }
     }
 
-    fn jp(cpu: &Cpu, _phase: Phase) -> Stage {
-        todo!("inst {:?}", cpu)
+    fn jp(cpu: &Cpu, phase: Phase) -> Stage {
+        // JP n16
+        match phase {
+            Phase::InstFetch => {
+                cpu.pc().inc(1);
+                Stage::Read(OpdSrc::Mem16(cpu.pc().get()))
+            }
+            Phase::ValueReady(src) => {
+                println!("JP {:04X}", src.get16());
+                cpu.pc().set(src.get16());
+                Stage::Wait(OpdDst::Done)
+            }
+        }
     }
 
     fn jpcc(cpu: &Cpu, _phase: Phase) -> Stage {
@@ -737,7 +751,6 @@ mod inst {
         todo!("inst {:?}", cpu)
     }
 
-
     fn sub(cpu: &Cpu, phase: Phase) -> Stage {
         // SUB A, r/m8
         match phase {
@@ -765,6 +778,25 @@ mod inst {
         todo!("inst {:?}", cpu)
     }
 
+    fn and(cpu: &Cpu, phase: Phase) -> Stage {
+        // AND A, r/m8
+        match phase {
+            Phase::InstFetch => {
+                let idx = cpu.opcode & 0x07;
+                decode_regind8_src(cpu, idx)
+            }
+            Phase::ValueReady(src) => {
+                let and = cpu.a().get() & src.get8();
+                cpu.a().set(and);
+                let z = ((and == 0) as u8) << Cpu::ZBIT;
+                let h = 1 << Cpu::HBIT;
+                cpu.f().set(z | h);
+                cpu.pc().inc(1);
+                Stage::Fetch
+            }
+        }
+    }
+
     fn xor(cpu: &Cpu, phase: Phase) -> Stage {
         // XOR A, r/m8
         match phase {
@@ -775,7 +807,25 @@ mod inst {
             Phase::ValueReady(src) => {
                 let xor = cpu.a().get() ^ src.get8();
                 cpu.a().set(xor);
-                let z = ((xor == 0) as u8) << 7;
+                let z = ((xor == 0) as u8) << Cpu::ZBIT;
+                cpu.f().set(z);
+                cpu.pc().inc(1);
+                Stage::Fetch
+            }
+        }
+    }
+
+    fn or(cpu: &Cpu, phase: Phase) -> Stage {
+        // OR A, r/m8
+        match phase {
+            Phase::InstFetch => {
+                let idx = cpu.opcode & 0x07;
+                decode_regind8_src(cpu, idx)
+            }
+            Phase::ValueReady(src) => {
+                let or = cpu.a().get() | src.get8();
+                cpu.a().set(or);
+                let z = ((or == 0) as u8) << Cpu::ZBIT;
                 cpu.f().set(z);
                 cpu.pc().inc(1);
                 Stage::Fetch
@@ -805,29 +855,64 @@ mod inst {
         }
     }
 
-    fn addimm(cpu: &Cpu, _phase: Phase) -> Stage {
-        todo!("inst {:?}", cpu)
+    fn addimm(cpu: &Cpu, phase: Phase) -> Stage {
+        // ADD A, n8
+        match phase {
+            Phase::InstFetch => Stage::Read(OpdSrc::Mem8(cpu.pc().pre_inc(1))),
+            Phase::ValueReady(_) => add(cpu, phase),
+        }
     }
-    fn adcimm(cpu: &Cpu, _phase: Phase) -> Stage {
-        todo!("inst {:?}", cpu)
+
+    fn adcimm(cpu: &Cpu, phase: Phase) -> Stage {
+        // ADC A, n8
+        match phase {
+            Phase::InstFetch => Stage::Read(OpdSrc::Mem8(cpu.pc().pre_inc(1))),
+            Phase::ValueReady(_) => adc(cpu, phase),
+        }
     }
-    fn subimm(cpu: &Cpu, _phase: Phase) -> Stage {
-        todo!("inst {:?}", cpu)
+
+    fn subimm(cpu: &Cpu, phase: Phase) -> Stage {
+        // SUB A, n8
+        match phase {
+            Phase::InstFetch => Stage::Read(OpdSrc::Mem8(cpu.pc().pre_inc(1))),
+            Phase::ValueReady(_) => sub(cpu, phase),
+        }
     }
-    fn sbcimm(cpu: &Cpu, _phase: Phase) -> Stage {
-        todo!("inst {:?}", cpu)
+
+    fn sbcimm(cpu: &Cpu, phase: Phase) -> Stage {
+        // SBC A, n8
+        match phase {
+            Phase::InstFetch => Stage::Read(OpdSrc::Mem8(cpu.pc().pre_inc(1))),
+            Phase::ValueReady(_) => sbc(cpu, phase),
+        }
     }
-    fn andimm(cpu: &Cpu, _phase: Phase) -> Stage {
-        todo!("inst {:?}", cpu)
+
+    fn andimm(cpu: &Cpu, phase: Phase) -> Stage {
+        // AND A, n8
+        match phase {
+            Phase::InstFetch => Stage::Read(OpdSrc::Mem8(cpu.pc().pre_inc(1))),
+            Phase::ValueReady(_) => and(cpu, phase),
+        }
     }
-    fn xorimm(cpu: &Cpu, _phase: Phase) -> Stage {
-        todo!("inst {:?}", cpu)
+
+    fn xorimm(cpu: &Cpu, phase: Phase) -> Stage {
+        // XOR A, n8
+        match phase {
+            Phase::InstFetch => Stage::Read(OpdSrc::Mem8(cpu.pc().pre_inc(1))),
+            Phase::ValueReady(_) => xor(cpu, phase),
+        }
     }
-    fn orimm(cpu: &Cpu, _phase: Phase) -> Stage {
-        todo!("inst {:?}", cpu)
+
+    fn orimm(cpu: &Cpu, phase: Phase) -> Stage {
+        // OR A, n8
+        match phase {
+            Phase::InstFetch => Stage::Read(OpdSrc::Mem8(cpu.pc().pre_inc(1))),
+            Phase::ValueReady(_) => or(cpu, phase),
+        }
     }
 
     fn cpimm(cpu: &Cpu, phase: Phase) -> Stage {
+        // CP A, n8
         match phase {
             Phase::InstFetch => Stage::Read(OpdSrc::Mem8(cpu.pc().pre_inc(1))),
             Phase::ValueReady(_) => cp(cpu, phase),
@@ -874,10 +959,11 @@ mod inst {
             Phase::InstFetch => {
                 cpu.pc().inc(1);
                 Stage::Read(OpdSrc::Mem16(cpu.pc().post_inc(2)))
-            },
-            Phase::ValueReady(src) => {
-                Stage::Wait(OpdDst::Mem16(cpu.sp().pre_dec(2), cpu.pc().replace(src.get16())))
             }
+            Phase::ValueReady(src) => Stage::Wait(OpdDst::Mem16(
+                cpu.sp().pre_dec(2),
+                cpu.pc().replace(src.get16()),
+            )),
         }
     }
 
@@ -912,7 +998,7 @@ mod inst {
         // PUSH r16
         match phase {
             Phase::InstFetch => {
-                let idx = cpu.opcode >> 4 & 0x3;
+                let idx = (cpu.opcode >> 4) & 0x3;
                 decode_reg16_src(cpu, idx)
             }
             Phase::ValueReady(src) => {
@@ -922,14 +1008,21 @@ mod inst {
         }
     }
 
-    fn intr(cpu: &Cpu, _phase: Phase) -> Stage {
-        todo!("inst {:?}", cpu)
+    fn di(cpu: &Cpu, _phase: Phase) -> Stage {
+        cpu.ime.set(false);
+        cpu.pc().inc(1);
+        Stage::Fetch
+    }
+
+    fn ei(cpu: &Cpu, _phase: Phase) -> Stage {
+        cpu.ime_enable.set(ImeSet::Init);
+        cpu.pc().inc(1);
+        Stage::Fetch
     }
 
     /* PREFIX is inval because it is handled by outer fetch loop */
     #[rustfmt::skip]
     pub(super) const INST_TABLE: [InstOp; 0x100] = {
-        use super::inst::*;
         [
             /* 0x0x */
             nop,    ld16,   ldinda, inc16,  inc8,   dec8,   ld8imm, rlca,
@@ -962,10 +1055,10 @@ mod inst {
             sub,    sub,    sub,    sub,    sub,    sub,    sub,    sub,
             sbc,    sbc,    sbc,    sbc,    sbc,    sbc,    sbc,    sbc,
             /* 0xAx */
-            unimpl, unimpl, unimpl, unimpl, unimpl, unimpl, unimpl, unimpl,
+            and,    and,    and,    and,    and,    and,    and,    and,
             xor,    xor,    xor,    xor,    xor,    xor,    xor,    xor,
             /* 0xBx */
-            unimpl, unimpl, unimpl, unimpl, unimpl, unimpl, unimpl, unimpl,
+            or,     or,     or,     or,     or,     or,     or,     or,
             cp,     cp,     cp,     cp,     cp,     cp,     cp,     cp,
             /* 0xCx */
             retcc,  pop,    jpcc,   jp,     callcc, push,   addimm, rst,
@@ -977,10 +1070,55 @@ mod inst {
             ldhia,  pop,    ldhca,  inval,  inval,  push,   andimm, rst,
             offtsp, jphl,   ldia,   inval,  inval,  inval,  xorimm, rst,
             /* 0xFx */
-            ldhai,  pop,    ldhac,  intr,   inval,  push,   orimm,  rst,
-            offtsp, ldsphl, ldai,   intr,   inval,  inval,  cpimm,  rst,
+            ldhai,  pop,    ldhac,  di,     inval,  push,   orimm,  rst,
+            offtsp, ldsphl, ldai,   ei,     inval,  inval,  cpimm,  rst,
         ]
     };
+}
+
+enum IntrStage {
+    None,
+    Init(u16),
+    Wait(u16),
+    Exec(u16),
+}
+
+#[derive(Clone, Copy)]
+enum ImeSet {
+    None,
+    Init,
+    Wait,
+}
+
+pub struct Cpu {
+    regs: [u16; 6],
+    pub(self) ime: Cell<bool>, /* interrupt master enable */
+    pub(self) stop: Cell<bool>,
+    pub(self) halt: Cell<bool>,
+
+    /* interrupt states */
+    intr_stage: IntrStage,
+    pub(self) ime_enable: Cell<ImeSet>,
+
+    /* sub-instruction M-cycles state */
+    pub(self) opcode: u8, /* executing opcode */
+    pub(self) instop: InstOp,
+    stage: Stage,
+}
+
+impl fmt::Debug for Cpu {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        f.debug_struct("Cpu")
+            .field("BC", &format_args!("{:04X}", self.bc().get()))
+            .field("DE", &format_args!("{:04X}", self.de().get()))
+            .field("HL", &format_args!("{:04X}", self.hl().get()))
+            .field("AF", &format_args!("{:04X}", self.af().get()))
+            .field("SP", &format_args!("{:04X}", self.sp().get()))
+            .field("PC", &format_args!("{:04X}", self.pc().get()))
+            .field("opcode", &format_args!("{:02X}", self.opcode))
+            .field("stage", &self.stage)
+            .finish()
+    }
 }
 
 impl Cpu {
@@ -994,6 +1132,10 @@ impl Cpu {
             ime: Cell::new(false),
             stop: Cell::new(false),
             halt: Cell::new(false),
+
+            intr_stage: IntrStage::None,
+            ime_enable: Cell::new(ImeSet::None),
+
             opcode: 0,
             instop: inst::INST_TABLE[0],
             stage: Stage::Fetch,
@@ -1023,13 +1165,46 @@ impl Cpu {
         })
     }
 
-    fn intr(&mut self) {}
+    pub fn intr(&mut self, addr: bus::Addr) -> bool {
+        if self.ime.get() {
+            self.intr_stage = IntrStage::Init(addr);
+            true
+        } else {
+            false
+        }
+    }
+
+    fn intr_step(&mut self) -> ControlFlow<()> {
+        self.ime_enable.set(match self.ime_enable.get() {
+            ImeSet::None => ImeSet::None,
+            ImeSet::Init => ImeSet::Wait,
+            ImeSet::Wait => {
+                self.ime.set(true);
+                ImeSet::None
+            }
+        });
+        self.intr_stage = match self.intr_stage {
+            IntrStage::None => IntrStage::None,
+            IntrStage::Init(addr) => IntrStage::Wait(addr),
+            IntrStage::Wait(addr) => IntrStage::Exec(addr),
+            IntrStage::Exec(addr) => {
+                println!("intr from {:04X} to {addr:04X}", self.pc().get());
+                self.stage = Stage::Read(OpdSrc::Done16(addr));
+                self.instop = inst::INST_TABLE[0xCD]; // call
+                IntrStage::None
+            }
+        };
+        match self.intr_stage {
+            IntrStage::None => ControlFlow::Continue(()),
+            _ => ControlFlow::Break(()),
+        }
+    }
 
     /*
-     * one cycle is one M-cycle, 4 T states in Z80 terms
-     * one cycle can only have at most 1 bus read/write
+     * one tick is one M-cycle, 4 T states in Z80 terms
+     * one M-cycle can only have at most 1 bus read/write
      */
-    pub fn cycle(&mut self, bus: &mut bus::Bus) -> bool {
+    pub fn tick(&mut self, bus: &mut bus::Bus) -> bool {
         if self.stop.get() || self.halt.get() {
             return false;
         }
@@ -1037,6 +1212,10 @@ impl Cpu {
         let mut memop = false;
         self.stage = match self.stage {
             Stage::Fetch => {
+                // if matches!(self.intr_step(), ControlFlow::Break(_)) {
+                //     return true;
+                // }
+
                 self.opcode = bus.read(self.pc().get());
                 memop = true;
                 if self.opcode == 0xCB {
@@ -1060,7 +1239,7 @@ impl Cpu {
                 Stage::Write(dst)
             }
         };
-        
+
         if let Stage::Read(src) = self.stage {
             if src.ready() || !memop {
                 let src = src.read_step(bus);
@@ -1072,7 +1251,7 @@ impl Cpu {
                 }
             }
         }
-        
+
         if let Stage::Write(dst) = self.stage {
             if dst.ready() || !memop {
                 let dst = dst.write_step(bus);

@@ -6,6 +6,8 @@ mod cart;
 mod cpu;
 mod gb;
 mod graphic;
+mod intr;
+mod timer;
 mod reg;
 #[macro_use]
 mod wasm;
@@ -37,7 +39,7 @@ pub fn get_gamerom_ptr(gb: &mut gb::GB) -> *const u8 {
 
 #[unsafe(no_mangle)]
 pub fn run_frame(gb: &mut gb::GB, count: usize) {
-    let _ = (0..count).try_for_each(|_| gb.cycle());
+    let _ = (0..count).try_for_each(|_| gb.tick());
     gb.bus.ppu.put_tile_image();
 }
 
