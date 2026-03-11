@@ -3,8 +3,8 @@ CRATE_NAME := gb_rs
 SRCDIR := src
 DSTDIR := build
 
-CRATE_FLAGS := --crate-name $(CRATE_NAME) --edition=2024 --crate-type cdylib
-CODEGEN_FLAGS := --emit=dep-info,link -C opt-level=z -C panic=abort
+CRATE_FLAGS := --crate-name $(CRATE_NAME) --edition=2024 --crate-type cdylib -L crate=$(DSTDIR)
+CODEGEN_FLAGS := -C opt-level=z -C panic=abort
 
 RUSTC_TARGET := --target wasm32-unknown-unknown
 #RUSTC_TARGET := --target wasm32v1-none
@@ -26,6 +26,9 @@ ifneq ("$(wildcard $(RUSTC_DEPINFO))","")
     include $(RUSTC_DEPINFO)
 endif
 
+$(RUSTC_DEPINFO):
+	rustc $(RUSTC_FLAGS) --emit=dep-info --out-dir $(DSTDIR) $(SRCDIR)/lib.rs
+
 $(PROC_MACRO_OBJ): $(SRCDIR)/my_proc_macro.rs
 	rustc $^ --out-dir $(DSTDIR)
 
@@ -33,4 +36,4 @@ $(DSTDIR):
 	mkdir $(DSTDIR)
 
 $(WASM_OBJ):
-	rustc $(RUSTC_FLAGS) -L crate=build --out-dir $(DSTDIR) $(SRCDIR)/lib.rs
+	rustc $(RUSTC_FLAGS) --emit=link --out-dir $(DSTDIR) $(SRCDIR)/lib.rs
