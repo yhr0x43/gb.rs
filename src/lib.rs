@@ -1,4 +1,5 @@
 #![no_std]
+#![allow(unused)]
 
 mod audio;
 mod bus;
@@ -14,11 +15,9 @@ mod wasm;
 
 use crate::wasm::*;
 
-static mut GB_SINGLETON: gb::GB = gb::GB::new();
-
 #[unsafe(no_mangle)]
 pub fn gb_get() -> *mut gb::GB {
-    println!("fetched GB instance");
+    static mut GB_SINGLETON: gb::GB = gb::GB::new();
     &raw mut GB_SINGLETON
 }
 
@@ -51,7 +50,7 @@ pub fn get_tile_image_ptr(gb: &gb::GB) -> *const u8 {
 #[unsafe(no_mangle)]
 pub fn pause(gb: &mut gb::GB, val: i32) {
     gb.paused = val != 0;
-    println!("{:?}", gb.cpu);
+    // println!("{:?}", gb.cpu);
 }
 
 #[unsafe(no_mangle)]

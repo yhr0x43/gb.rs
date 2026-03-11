@@ -52,22 +52,10 @@ impl GB {
 
         self.bus.intr.tick(&mut self.cpu);
 
-        if matches!(self.cpu.pc().get(), 0x0A0E..0x0A89 | 0x0E45..0x0E48)
-            || matches!(self.cpu.sp().get(), 0xDFF9)
-        {
-            println!("{}: {:?}", self.tick, self.cpu);
-        }
-
-        // if false && matches!(self.cpu.sp().get(), 0xDFF9) {
+        // if matches!(self.cpu.pc().get(), 0x0A0E..0x0A89 | 0x0E45..0x0E5A)
+        //     || matches!(self.cpu.sp().get(), 0xDFF9)
+        // {
         //     println!("{}: {:?}", self.tick, self.cpu);
-        //     println!("{:02X} {:02X} {:02X} {:02X} {:02X} {:02X}",
-        //         self.bus.read(self.cpu.sp().get()),
-        //         self.bus.read(self.cpu.sp().get() + 1),
-        //         self.bus.read(self.cpu.sp().get() + 2),
-        //         self.bus.read(self.cpu.sp().get() + 3),
-        //         self.bus.read(self.cpu.sp().get() + 4),
-        //         self.bus.read(self.cpu.sp().get() + 5)
-        //     );
         // }
 
         self.tick += 1;
