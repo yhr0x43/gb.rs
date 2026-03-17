@@ -1,1 +1,6 @@
 /build
+*.bin
+*.gb
+*.gbc
+dmg.bin
+
