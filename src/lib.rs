@@ -13,12 +13,25 @@ mod reg;
 #[macro_use]
 mod wasm;
 
+use core::alloc::{GlobalAlloc, Layout};
+use core::mem::{MaybeUninit, forget};
+use core::ptr;
+
 use crate::wasm::*;
 
 #[unsafe(no_mangle)]
 pub fn gb_get() -> *mut gb::GB {
-    static mut GB_SINGLETON: gb::GB = gb::GB::new();
-    &raw mut GB_SINGLETON
+    // static mut GB_INSTANCE: gb::GB = gb::GB::new();
+    // unsafe { &raw mut GB_INSTANCE }
+    // println!("begin gb_get");
+    let layout = Layout::new::<gb::GB>();
+    unsafe {
+        let gb_ptr = ALLOCATOR.alloc_zeroed(layout) as *mut gb::GB;
+        if let Some(gb) = gb_ptr.as_mut() {
+            gb.init()
+        }
+        gb_ptr
+    }
 }
 
 #[unsafe(no_mangle)]

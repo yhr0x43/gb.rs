@@ -14,12 +14,7 @@ pub(crate) struct Intr {
 }
 
 impl Intr {
-    pub const fn new() -> Intr {
-        Intr {
-            reg_ie: 0,
-            reg_if: 0,
-        }
-    }
+    pub const fn init(&mut self) { }
     
     pub fn read_ie(&self) -> u8 {
         self.reg_ie

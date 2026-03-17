@@ -24,26 +24,18 @@ pub(crate) struct Bus {
 }
 
 impl Bus {
-    pub const fn new() -> Self {
-        Bus {
-            bootrom: [0; 0x100],
+    pub const fn init(&mut self) {
+        self.apu.init();
+        self.ppu.init();
+        self.cart.init();
+        self.intr.init();
+        self.timer.init();
 
-            wram: [0; 0x2000],
-            hram: [0; 0x7F],
+        self.boot_map = true;
 
-            apu: Apu::new(),
-            ppu: Ppu::new(),
-            cart: Cart::new(),
-            intr: Intr::new(),
-            timer: Timer::new(),
-
-            boot_map: true,
-
-            // hi: A, B, Select, Start. 0 = Pressed; 1 = Not pressed.
-            // lo: Right, Left, Up, Down. 0 = Pressed; 1 = Not pressed.
-            joy_state: 0xFF,
-            joy_sel: 0x00,
-        }
+        // hi: A, B, Select, Start. 0 = Pressed; 1 = Not pressed.
+        // lo: Right, Left, Up, Down. 0 = Pressed; 1 = Not pressed.
+        self.joy_state = 0xFF;
     }
 
     pub fn write_joystate(&mut self, state: u8) {

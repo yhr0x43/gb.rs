@@ -1,6 +1,11 @@
 use crate::bus;
 use crate::gb;
 
+struct ObjLine {
+    tile: [u8; 8],
+    x: u8,
+}
+
 pub struct Ppu {
     pub(crate) frame_buffer: [u8; gb::FRAME_BUFFER_SIZE],
     write_pos: usize, // offset into frame_buffer
@@ -8,6 +13,11 @@ pub struct Ppu {
     pub(crate) tile_image: [u8; 0x40000],
 
     hdot: u16, // logical dot (progress) in one hline
+
+    // OBJ rendering states
+    objs: [ObjLine; 0xA],
+    obj_put: u8,
+    obj_fetch: u8,
 
     // internal Mode 3 states
     draw: bool,         // if we are in Mode 3
@@ -43,34 +53,8 @@ impl Ppu {
     const LCDC_OBJ_ENABLE: u8 = 0x02;
     const LCDC_BGWN_PRIO: u8 = 0x01;
 
-    pub const fn new() -> Ppu {
-        Ppu {
-            tile_image: [0; 0x40000],
-            
-            frame_buffer: [0; gb::FRAME_BUFFER_SIZE],
-            write_pos: 0,
-            draw: false,
-            lx: 0,
-            hdot: 0,
-            penalty: 0,
-            sc3_line: 0,
-            tile_line: [0; 8],
-
-            vram: [0; 0x2000],
-            oam: [0; 0xA0],
-
-            lcdc: 0,
-            stat: 0,
-            scy: 0,
-            scx: 0,
-            ly: 0,
-            lyc: 0,
-            bgp: 0,
-            obp0: 0,
-            obp1: 0,
-            wx: 0,
-            wy: 0,
-        }
+    pub const fn init(&mut self) {
+        self.draw = false;
     }
 
     // TODO(yhr0x43): memory locking
@@ -139,27 +123,26 @@ impl Ppu {
             }
         }
 
+        // HBlank
         if self.ly >= gb::FRAME_HEIGHT as u8 {
             return;
         }
 
-        let map_x = self.lx.wrapping_add(self.scx);
-        let map_y = self.ly.wrapping_add(self.scy);
+        if self.hdot == 0 {
+            self.obj_put = 0;
+            self.obj_fetch = 0;
+        }
 
         if self.hdot < 80 {
-            if self.lcdc & Ppu::LCDC_OBJ_ENABLE != 0 {
+            if self.lcdc & Ppu::LCDC_OBJ_ENABLE != 0 && self.hdot.is_multiple_of(8) {
                 todo!("Object Rendering");
             }
-            return;
         }
 
         // begin Mode 3
         if self.hdot == 80 {
             self.sc3_line = self.scx % 8;
             self.penalty = self.sc3_line;
-            self.draw = true;
-
-            self.tile_line = self.fetch_tile(map_x, map_y);
         }
 
         if self.penalty > 0 {
@@ -167,50 +150,65 @@ impl Ppu {
             return;
         }
 
-        if self.draw {
-            let tgt = (self.lx as usize + self.ly as usize * gb::FRAME_WIDTH) * 4;
+        let map_x = self.lx.wrapping_add((self.scx & 0xF8) | self.sc3_line);
+        let map_y = self.ly.wrapping_add(self.scy);
 
-            if map_x % 8 == 0 {
-                self.tile_line = self.fetch_tile(map_x, map_y);
-            }
+        let obj_color =
+            if self.lcdc & Ppu::LCDC_OBJ_ENABLE != 0 {
+                self.objs[0].tile[0]
+            } else {
+                0x00
+            };
+        
 
-            let (r, g, b, a) = Ppu::map_color(self.tile_line[(map_x % 8) as usize]);
-            self.frame_buffer[tgt + 0] = r;
-            self.frame_buffer[tgt + 1] = g;
-            self.frame_buffer[tgt + 2] = b;
-            self.frame_buffer[tgt + 3] = a;
+        let bg_color =
+            if self.lcdc & Ppu::LCDC_BGWN_PRIO != 0 {
+                let window_color =
+                    if self.lcdc & Ppu::LCDC_WN_ENABLE != 0 {
+                        todo!("draw window")
+                    } else {
+                        0x00
+                    };
 
-            self.lx += 1;
-            if self.lx >= gb::FRAME_WIDTH as u8 {
-                self.draw = false;
-                self.lx = 0;
-            }
+                if window_color != 0x00 {
+                    window_color
+                } else {
+                    if self.hdot == 80 || map_x.is_multiple_of(8) {
+                        self.tile_line = self.fetch_tile(map_x, map_y).map(|ci| (self.bgp & (0x3 << ci * 2)) >> ci * 2);
+                    }
+                    self.tile_line[(map_x % 8) as usize]
+                }
+            } else {
+                0x00
+            };
+
+        let tgt = (self.lx as usize + self.ly as usize * gb::FRAME_WIDTH) * 4;
+        self.frame_buffer[tgt..tgt+4].copy_from_slice(&Ppu::map_color(bg_color));
+
+        self.lx += 1;
+        if self.lx >= gb::FRAME_WIDTH as u8 {
+            self.lx = 0;
         }
         // end Mode 3
     }
 
     #[inline]
-    fn map_color(i: u8) -> (u8, u8, u8, u8) {
+    fn map_color(i: u8) -> [u8; 4] {
         match i & 0x3 {
-            0 => (0xFF, 0xFF, 0xFF, 0xFF),
-            1 => (0xAA, 0xAA, 0xAA, 0xFF),
-            2 => (0x55, 0x55, 0x55, 0xFF),
-            3 => (0x00, 0x00, 0x00, 0xFF),
+            0 => [0xFF, 0xFF, 0xFF, 0xFF],
+            1 => [0xAA, 0xAA, 0xAA, 0xFF],
+            2 => [0x55, 0x55, 0x55, 0xFF],
+            3 => [0x00, 0x00, 0x00, 0xFF],
             _ => unreachable!(),
         }
     }
 
     pub fn put_tile_image(&mut self) {
-        for y in 0..0x100 {
-            for x in (0..0x100).step_by(8) {
-                let tile = self.fetch_tile(x as u8, y as u8);
-                for (ic, c) in tile.into_iter().enumerate() {
-                    let (r, g, b, a) = Ppu::map_color(c);
-                    self.tile_image[(ic + x + y * 0x100) * 4 + 0] = r;
-                    self.tile_image[(ic + x + y * 0x100) * 4 + 1] = g;
-                    self.tile_image[(ic + x + y * 0x100) * 4 + 2] = b;
-                    self.tile_image[(ic + x + y * 0x100) * 4 + 3] = a;
-                }
+        for i in (0..0x10000).step_by(8) {
+            let tile = self.fetch_tile((i & 0xFF) as u8, (i >> 8) as u8);
+            for (ic, c) in tile.into_iter().enumerate() {
+                let tgt = (ic + i) * 4;
+                self.tile_image[tgt..tgt+4].copy_from_slice(&Ppu::map_color(c));
             }
         }
     }

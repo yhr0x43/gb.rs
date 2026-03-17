@@ -1138,20 +1138,17 @@ impl Cpu {
     my_proc_macro::reg16!(bc de hl af sp pc);
     my_proc_macro::reg8!(b c d e h l a f);
 
-    pub const fn new() -> Cpu {
-        Cpu {
-            regs: [0; 6],
-            ime: Cell::new(false),
-            stop: Cell::new(false),
-            halt: Cell::new(false),
+    pub const fn init(&mut self) {
+        self.regs = [0; 6];
+        self.ime = Cell::new(false);
+        self.stop = Cell::new(false);
+        self.halt = Cell::new(false);
+        self.intr_stage = IntrStage::None;;
+        self.ime_enable = Cell::new(ImeSet::None);
 
-            intr_stage: IntrStage::None,
-            ime_enable: Cell::new(ImeSet::None),
-
-            opcode: 0,
-            instop: inst::INST_TABLE[0],
-            stage: Stage::Fetch,
-        }
+        self.opcode = 0 ;
+        self.stage = Stage::Fetch;
+        self.instop = inst::INST_TABLE[0];
     }
 
     const ZBIT: u8 = 7;

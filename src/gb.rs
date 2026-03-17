@@ -24,13 +24,11 @@ pub struct GB {
 }
 
 impl GB {
-    pub const fn new() -> GB {
-        GB {
-            cpu: Cpu::new(),
-            bus: Bus::new(),
-            tick: 0,
-            paused: false,
-        }
+    pub const fn init(&mut self) {
+        self.cpu.init();
+        self.bus.init();
+        self.tick = 0;
+        self.paused = false;
     }
 
     pub fn write_button_state(&mut self, info: u8) {

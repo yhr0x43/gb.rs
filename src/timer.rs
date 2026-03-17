@@ -10,16 +10,7 @@ pub(crate) struct Timer {
 }
 
 impl Timer {
-    pub const fn new() -> Timer {
-        Timer {
-            div: 0,
-            tima: 0,
-            tma: 0,
-            tac: 0,
-
-            tick_count: 0,
-        }
-    }
+    pub const fn init(&mut self) { }
 
     pub fn tick(&mut self, intr: &mut Intr) {
         self.tick_count = self.tick_count.wrapping_add(1);

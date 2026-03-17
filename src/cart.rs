@@ -53,18 +53,8 @@ impl Cart {
     const ROM_BANK_SIZE: usize = 0x4000;
     const RAM_BANK_SIZE: usize = 0x2000;
 
-    pub const fn new() -> Cart {
-        Cart {
-            rom_image: [0; gb::MAX_CART_ROM_SIZE],
-            ram: [0; 0x20000],
-            ram_we: false,
-            ram_bank_offset: 0,
-            rom_bank_offset: Cart::ROM_BANK_SIZE,
-
-            mbc: MbcType::RomOnly,
-            ram_bank_limit: 0,
-            rom_bank_limit: 0,
-        }
+    pub const fn init(&mut self) {
+        self.mbc = MbcType::RomOnly;
     }
 
     fn parse_new_image(&mut self) {

@@ -1,10 +1,17 @@
+use core::alloc::{GlobalAlloc, Layout};
 use core::panic::PanicInfo;
 use core::fmt::{Arguments, Write, Error};
+use core::cell::Cell;
 use core::ptr;
-
+use core::arch::wasm32::{memory_size, memory_grow};
 
 unsafe extern "C" {
     pub fn wasm_log(ptr: *const u8, len: usize);
+}
+
+#[macro_export]
+macro_rules! println {
+    ($($t:tt)*) => ( wrap_wasm_log(&format_args!($($t)*)) )
 }
 
 struct WasmWriter {
@@ -50,16 +57,68 @@ impl Write for WasmWriter {
     }
 }
 
+#[global_allocator]
+pub static ALLOCATOR: Allocator = Allocator { used: Cell::new(false) };
+unsafe impl Sync for Allocator {}
 
+pub struct Allocator {
+    used: Cell<bool>,
+}
+
+const WASM_MEM_BLOCK_SIZE: usize = 0x10000; // 64 Ki
+
+unsafe impl GlobalAlloc for Allocator {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        if self.used.replace(true) {
+            return ptr::null_mut()
+        }
+
+        let size = layout.size();
+
+        if size == 0 {
+            return ptr::null_mut()
+        }
+
+        let delta_pages = size.div_ceil(WASM_MEM_BLOCK_SIZE);
+        let prev_pages = memory_grow(0, delta_pages);
+
+        if prev_pages == usize::MAX {
+            return ptr::null_mut();
+        };
+
+        let addr = prev_pages * WASM_MEM_BLOCK_SIZE;
+
+        if addr % layout.align() != 0 {
+            self.used.set(false);
+            return ptr::null_mut();
+        };
+
+        addr as *mut u8
+    }
+
+    unsafe fn dealloc(&self, _ptr: *mut u8, _layout: Layout) {
+    }
+}
 
 pub fn wrap_wasm_log(value: &Arguments) {
     let mut w = WasmWriter::new();
     write!(&mut w, "{}", value).unwrap();
 }
 
-#[macro_export]
-macro_rules! println {
-    ($($t:tt)*) => ( wrap_wasm_log(&format_args!($($t)*)) )
+
+fn fmt_u32(mut val: u32, buf: &mut [u8; 10]) -> &str {
+    let mut i = 0;
+    let mut divisor = 1000000000;
+    while i < 10 && divisor > 0 && val > 0{
+        let quotient = val / divisor;
+        if quotient != 0 {
+            buf[i] = (quotient as u8) | 0x30;
+            i += 1;
+            val %= divisor;
+        }
+        divisor /= 10;
+    }
+    unsafe { str::from_utf8_unchecked(&buf[0..i]) }
 }
 
 #[panic_handler]
@@ -71,3 +130,23 @@ fn wasm_panic(info: &PanicInfo) -> ! {
     drop(w);
     core::arch::wasm32::unreachable()
 }
+
+// fn wasm_panic(info: &PanicInfo) -> ! {
+//     let mut w = WasmWriter::new();
+//     let mut buf = [0; 10];
+//     if let Some(loc) = info.location() {
+//         let _ = w.write_str(loc.file());
+//         let _ = w.write_str(":");
+//         let _ = w.write_str(fmt_u32(loc.line(), &mut buf));
+//         let _ = w.write_str(":");
+//         let _ = w.write_str(fmt_u32(loc.column(), &mut buf));
+//         let _ = w.write_str("\n");
+//     }
+//     if let Some(msg) = info.message().as_str() {
+//         let _ = w.write_str(msg);
+//     } else {
+//         let _ = w.write_str("panic message formatting is not supported");
+//     }
+//     drop(w);
+//     core::arch::wasm32::unreachable()
+// }
