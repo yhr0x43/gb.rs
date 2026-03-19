@@ -41,12 +41,14 @@ pub(crate) struct Cart {
     ram: [u8; 0x20000],
     ram_we: bool,
 
-    ram_bank_offset: usize,
-    rom_bank_offset: usize,
+    pub bank2: u8,
+    pub bank4: u8,
 
     mbc: MbcType,
-    rom_bank_limit: u16,
+    rom_bank_limit: u8,
     ram_bank_limit: u8,
+
+    mbc1mode: bool,
 }
 
 impl Cart {
@@ -55,6 +57,7 @@ impl Cart {
 
     pub const fn init(&mut self) {
         self.mbc = MbcType::RomOnly;
+        self.bank2 = 1;
     }
 
     fn parse_new_image(&mut self) {
@@ -64,39 +67,73 @@ impl Cart {
         };
 
         self.rom_bank_limit = match self.rom_image[0x148] {
-            0x04 => 0x200,
+            0x04 => 0x40,
             _ => todo!("cart rom bank {}", self.rom_image[0x148]),
         };
 
         self.ram_bank_limit = match self.rom_image[0x149] {
-            0x03 => 4,
+            0x03 => 0x04,
             _ => todo!("cart ram bank {}", self.rom_image[0x149]),
         };
     }
 
+    fn low_rom_bank(&self) -> usize {
+        if self.mbc1mode {
+            self.bank4 << 5
+        } else {
+            0
+        }.into()
+    }
+
+    fn high_rom_bank(&self) -> usize {
+        (self.bank2 | self.bank4 << 5).into()
+    }
+
+    fn ram_bank(&self) -> usize {
+        if self.mbc1mode {
+            self.bank4 << 5
+        } else {
+            0
+        }.into()
+    }
 
     pub fn read_rom(&self, addr: bus::Addr) -> u8 {
         match addr {
-            0x0000..0x4000 => self.rom_image[addr as usize],
-            0x4000..0x8000 => self.rom_image[self.rom_bank_offset + addr as usize],
+            0x0000..0x4000 => self.rom_image[self.low_rom_bank() * Cart::ROM_BANK_SIZE | addr as usize],
+            0x4000..0x8000 => self.rom_image[self.high_rom_bank() * Cart::ROM_BANK_SIZE + (addr - 0x4000) as usize],
             _ => unreachable!("{addr:04X}")
         }
     }
 
     pub fn write_rom(&mut self, addr: bus::Addr, val: u8) {
         match addr {
-            0x2000..0x4000 => {
-                self.rom_bank_offset = Cart::ROM_BANK_SIZE * cmp::min(val & 0x1F, 1) as usize;
+            0x0000..0x2000 => {
+                self.ram_we = val & 0x0F == 0xA;
             }
-            _ => todo!("{addr:04X}, {val:02X}")
+            0x2000..0x4000 => {
+                println!("bank2xxx {}", val);
+                self.bank2 = cmp::max(val & 0x1F, 1);
+            }
+            0x4000..0x6000 => {
+                println!("bank4xxx {}", val);
+                self.bank4 = val & 0x03;
+            }
+            0x6000..0x8000 => {
+                self.mbc1mode = val & 0x01 != 0;
+            }
+            _ => unreachable!()
         }
     }
 
     pub fn read_ram(&self, addr: bus::Addr) -> u8 {
-        todo!("{addr:04X}")
+        let offset: usize = (addr - 0xA000).into();
+        self.ram[self.ram_bank() * Cart::RAM_BANK_SIZE + offset]
     }
 
     pub fn write_ram(&mut self, addr: bus::Addr, val: u8) {
-        todo!("{addr:04X}, {val:02X}")
+        if self.ram_we {
+            let offset: usize = (addr - 0xA000).into();
+            self.ram[self.ram_bank() * Cart::RAM_BANK_SIZE + offset] = val;
+        }
     }
 }
