@@ -580,8 +580,31 @@ mod inst {
         todo!("inst {:?}", cpu)
     }
 
-    fn offtsp(cpu: &Cpu, _phase: Phase) -> Stage {
-        todo!("inst {:?}", cpu)
+    fn offtsp(cpu: &Cpu, phase: Phase) -> Stage {
+        // ADD SP, e8; LD HL, SP + e8
+        match phase {
+            Phase::InstFetch => Stage::Read(OpdSrc::Mem8(cpu.pc().pre_inc(1))),
+            Phase::ValueReady(src) => {
+                let opd1 = cpu.sp().get();
+                let opd2 = src.get8();
+                let (sum, c) = (opd1 as u8).carrying_add(opd2, false);
+                let (hi, _) = ((opd1 >> 8) as u8).carrying_add(0, c);
+                let h = ((((opd1 as u8) & 0x0F + opd2 & 0x0F) & 0x10 != 0) as u8) << Cpu::HBIT;
+                let c = (c as u8) << Cpu::CBIT;
+                cpu.f().set(h | c);
+                cpu.pc().inc(1);
+
+                if cpu.opcode & 0x10 != 0 {
+                    // LD HL, SP + e8
+                    cpu.hl().set((hi as u16) << 8 | sum as u16);
+                    Stage::Write(OpdDst::Done)
+                } else {
+                    // ADD SP, e8
+                    cpu.sp().set((hi as u16) << 8 | sum as u16);
+                    Stage::Wait(OpdDst::Done)
+                }
+            }
+        }
     }
 
     fn inc16(cpu: &Cpu, phase: Phase) -> Stage {
@@ -930,7 +953,8 @@ mod inst {
     }
 
     fn rst(cpu: &Cpu, _phase: Phase) -> Stage {
-        todo!("inst {:?}", cpu)
+        cpu.intr((cpu.opcode & 0x38 >> 3).into());
+        Stage::Fetch
     }
 
     fn ret(cpu: &Cpu, phase: Phase) -> Stage {
@@ -970,10 +994,15 @@ mod inst {
                 cpu.pc().inc(1);
                 Stage::Read(OpdSrc::Mem16(cpu.pc().post_inc(2)))
             }
-            Phase::ValueReady(src) => Stage::Wait(OpdDst::Mem16(
-                cpu.sp().pre_dec(2),
-                cpu.pc().replace(src.get16()),
-            )),
+            Phase::ValueReady(src) => {
+                if src.get16() == 0x0038 {
+                    println!("call");
+                }
+                Stage::Wait(OpdDst::Mem16(
+                    cpu.sp().pre_dec(2),
+                    cpu.pc().replace(src.get16()),
+                ))
+            }
         }
     }
 
@@ -1088,6 +1117,7 @@ mod inst {
     };
 }
 
+#[derive(Clone, Copy)]
 enum IntrStage {
     None,
     Init(u16),
@@ -1109,7 +1139,7 @@ pub struct Cpu {
     pub(self) halt: Cell<bool>,
 
     /* interrupt states */
-    intr_stage: IntrStage,
+    intr_stage: Cell<IntrStage>,
     pub(self) ime_enable: Cell<ImeSet>,
 
     /* sub-instruction M-cycles state */
@@ -1143,10 +1173,10 @@ impl Cpu {
         self.ime = Cell::new(false);
         self.stop = Cell::new(false);
         self.halt = Cell::new(false);
-        self.intr_stage = IntrStage::None;;
+        self.intr_stage = Cell::new(IntrStage::None);
         self.ime_enable = Cell::new(ImeSet::None);
 
-        self.opcode = 0 ;
+        self.opcode = 0;
         self.stage = Stage::Fetch;
         self.instop = inst::INST_TABLE[0];
     }
@@ -1174,9 +1204,9 @@ impl Cpu {
         })
     }
 
-    pub fn intr(&mut self, addr: bus::Addr) -> bool {
+    pub fn intr(&self, addr: bus::Addr) -> bool {
         if self.ime.get() {
-            self.intr_stage = IntrStage::Init(addr);
+            self.intr_stage.set(IntrStage::Init(addr));
             true
         } else {
             false
@@ -1192,19 +1222,26 @@ impl Cpu {
                 ImeSet::None
             }
         });
-        self.intr_stage = match self.intr_stage {
+        let old_stage = self.intr_stage.get();
+        self.intr_stage.set(match old_stage {
             IntrStage::None => IntrStage::None,
             IntrStage::Init(addr) => IntrStage::Wait(addr),
             IntrStage::Wait(addr) => IntrStage::Exec(addr),
             IntrStage::Exec(addr) => {
-                // println!("intr from {:04X} to {addr:04X}", self.pc().get());
+                // println!("intr exec {:04X} to {addr:04X}", self.pc().get());
                 self.stage = Stage::Read(OpdSrc::Done16(addr));
                 self.instop = inst::INST_TABLE[0xCD]; // call
                 IntrStage::None
             }
-        };
-        match self.intr_stage {
-            IntrStage::None => ControlFlow::Continue(()),
+        });
+        match old_stage {
+            IntrStage::None => {
+                if matches!(self.intr_stage.get(), IntrStage::None) {
+                    ControlFlow::Continue(())
+                } else {
+                    ControlFlow::Break(())
+                }
+            }
             _ => ControlFlow::Break(()),
         }
     }
@@ -1221,19 +1258,19 @@ impl Cpu {
         let mut memop = false;
         self.stage = match self.stage {
             Stage::Fetch => {
-                // if matches!(self.intr_step(), ControlFlow::Break(_)) {
-                //     return true;
-                // }
-
-                self.opcode = bus.read(self.pc().get());
-                memop = true;
-                if self.opcode == 0xCB {
-                    // PREFIX
-                    self.pc().inc(1);
-                    Stage::FetchPrefixed
+                if matches!(self.intr_step(), ControlFlow::Break(_)) {
+                    self.stage
                 } else {
-                    self.instop = inst::INST_TABLE[self.opcode as usize];
-                    (self.instop)(&self, Phase::InstFetch)
+                    self.opcode = bus.read(self.pc().get());
+                    memop = true;
+                    if self.opcode == 0xCB {
+                        // PREFIX
+                        self.pc().inc(1);
+                        Stage::FetchPrefixed
+                    } else {
+                        self.instop = inst::INST_TABLE[self.opcode as usize];
+                        (self.instop)(&self, Phase::InstFetch)
+                    }
                 }
             }
             Stage::FetchPrefixed => {
