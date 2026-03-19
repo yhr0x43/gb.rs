@@ -31,17 +31,10 @@ impl GB {
         self.paused = false;
     }
 
-    pub fn write_button_state(&mut self, info: u8) {
-        let previous_matrix = self.read_joystate();
-
-        self.joy_sel = value & 0x30;
-        let current_matrix = self.read_joystate();
-
-        let bits_changed = previous_matrix & !current_matrix & 0x0F;
-        if bits_changed != 0 {
-            self.bus.intr.request(bus::IntrType::Joypad);
-        }
+    pub fn write_joystate(&mut self, state: u8) {
+        self.bus.write_joystate(state);
     }
+
 
     pub fn tick(&mut self) -> ControlFlow<()> {
         if self.paused {

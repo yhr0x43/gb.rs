@@ -39,12 +39,38 @@ impl Bus {
     }
 
     pub fn write_joystate(&mut self, state: u8) {
+        let previous_matrix = self.read_joystate();
+
         self.joy_state = state;
+        let current_matrix = self.read_joystate();
+        let bits_changed = previous_matrix & !current_matrix & 0x0F;
+        if bits_changed != 0 {
+            self.intr.request(intr::IntrSrc::Joypad);
+        }
+    }
+
+    pub fn write_joy_sel(&mut self, value: u8) {
+        let previous_matrix = self.read_joystate();
+        self.joy_sel = value & 0x30;
+
+        let current_matrix = self.read_joystate();
+
+        let bits_changed = previous_matrix & !current_matrix & 0x0F; 
+        if bits_changed != 0 {
+            self.intr.request(intr::IntrSrc::Joypad);
+        }
     }
 
     pub fn read_joystate(&self) -> u8 {
-        
-        !(self.joy_state >> (4 * (self.joy_sel - 1))) & 0x0F | self.joy_sel
+        let mut result = 0xC0 | self.joy_sel | 0x0F;
+        if (self.joy_sel & 0x10) == 0 {
+            result &= (self.joy_state & 0x0F) | 0xF0;
+        }
+
+        if (self.joy_sel & 0x20) == 0 {
+            result &= ((self.joy_state >> 4 ) & 0x0F) | 0xF0;
+        }
+        result
     }
 
     pub fn read(&self, addr: Addr) -> u8 {
