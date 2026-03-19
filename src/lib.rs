@@ -67,6 +67,14 @@ pub fn pause(gb: &mut gb::GB, val: i32) {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn write_joystate(gb: &mut gb::GB, info: usize) {
-    gb.write_joystate(state);
-} 
+pub extern "C" fn write_button_state(gb: &mut gb::GB, info: usize) {
+    let previous_matrix = gb.bus.read_joystate();
+
+    gb.bus.joy_sel = info as u8 & 0x30;
+    let current_matrix = gb.bus.read_joystate();
+
+    let bits_changed = previous_matrix & !current_matrix & 0x0F;
+    if bits_changed != 0 {
+        // gb.bus.intr.request(bus::IntrType::Joypad);
+    }
+}

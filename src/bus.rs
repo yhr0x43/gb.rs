@@ -15,7 +15,7 @@ pub(crate) struct Bus {
     pub(crate) timer: Timer,
 
     joy_state: u8,
-    joy_sel: u8,
+    pub(crate) joy_sel: u8,
 
     wram: [u8; 0x2000],
     hram: [u8; 0x7F],

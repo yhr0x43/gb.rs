@@ -31,11 +31,6 @@ impl GB {
         self.paused = false;
     }
 
-    pub fn write_joystate(&mut self, state: u8) {
-        self.bus.write_joystate(state);
-    }
-
-
     pub fn tick(&mut self) -> ControlFlow<()> {
         if self.paused {
             return ControlFlow::Break(());
@@ -53,6 +48,7 @@ impl GB {
 
         // if matches!(self.cpu.pc().get(), 0x0A0E..0x0A89 | 0x0E45..0x0E5A)
         //     || matches!(self.cpu.sp().get(), 0xDFF9)
+        // if self.tick > 1000000
         // {
         //     println!("{}: {:?}", self.tick, self.cpu);
         // }
