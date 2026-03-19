@@ -5,25 +5,27 @@
         <link rel="icon" href="data:image/png;base64,iVBORw0KGgo=">
         <style>
          body { background-color: #020137; color: #d6d6d6; }
+         .controls {
+            margin-top: 15px;
+            font-size: 0.9em;
+            color: #888;
+            font-family: monospace;
+         }
         </style>
     </head>
     <body>
         <label for="bootrom">Choose a bootrom:</label>
         <input type="file" id="bootrom" name="bootrom" accept="application/octet-stream" />
-        <br/>
         <label for="gamerom">Choose a Game Rom:</label>
         <input type="file" id="gamerom" name="gamerom" accept="application/x-gameboy-rom" />
-        <br/>
         <input type="button" id="pause" name="pause" value="Pause" disabled />
-        <br/>
         <canvas id="app" width ="160" height="144"></canvas>
-        <br/>
-        <canvas id="debug" width ="256" height="256"></canvas>
+        <div class ="Controls">
+            Controls: [Arrows] D-Pad | [Z] B | [X] A | [Enter] Start | [Shift] Select
+        </div>
         <script>
          const app = document.getElementById("app");
          const ctx = app.getContext("2d");
-
-         const debug_canvas = document.getElementById("debug").getContext("2d");
 
          const bootromInput = document.getElementById("bootrom");
 
@@ -61,7 +63,6 @@
                  let paused = false;
                  pause_btn.addEventListener('click', (ev) => {
                      paused = !paused;
-                     pause_btn.value = paused ? "Unpause" : "Pause";
                      instance.exports.pause(gb, paused);
                  });
                  pause_btn.disabled = false;
@@ -69,27 +70,57 @@
                  let bootrom_ptr = instance.exports.get_bootrom_ptr(gb);
                  let gamerom_ptr = instance.exports.get_gamerom_ptr(gb);
                  let frame_buffer_ptr = instance.exports.get_frame_buffer_ptr(gb);
-                 let tile_image_ptr = instance.exports.get_tile_image_ptr(gb);
                  
                  (new Uint8Array(memory.buffer, bootrom_ptr, 0x100)).set(await bootrom);
                  (new Uint8Array(memory.buffer, gamerom_ptr, 0x80000)).set(await gamerom);
 
-                 let lastTs;
-                 function draw(timestamp) {
-                     const delta = timestamp - lastTs;
-                     timestamp = lastTs;
-                     // TODO(yhr0x43): implement getting input data
-                     /* let input_data = 0xFF;
-                      * instance.exports.put_joy_info(gb, input_data); */
+                
+                let input_data = 0xFF; // Unpressed
+                const joyMap = {
+                    'Enter': 0,
+                    'Shift': 1,
+                    'KeyZ': 2,
+                    'KeyX': 3,
+                    'ArrowRight': 4,
+                    'ArrowLeft': 5,
+                    'ArrowUp': 6,
+                    'ArrowDown': 7,
+                };
 
+                window.addEventListener('keydown', event => {
+                    if (event.code in joyMap) {
+                        event.preventDefault(); // Prevent scrolling with arrow keys ? Don't know if it's needed
+                        input_data &= ~(1 << joyMap[event.code]); // AND NOT  -> Set to 0 
+                    }
+                });
+                
+                window.addEventListener('keyup', event => {
+                    if (event.code in joyMap) {
+                        event.preventDefault();
+                        input_data |= (1 << joyMap[event.code]); // OR -> Set to 1
+                    }
+                });
+
+                let lastTs;
+                function draw(timestamp) {
+                    
+                    if (lastTs === undefined) lastTs = timestamp;
+                    let delta = timestamp - lastTs;
+                    lastTs = timestamp;
+
+                    if (delta > 250) delta = 250; // Cap
+                    instance.exports.write_joystate(gb, input_data);
+
+                    cycleAccum += delta * 1048.576;
+
+                    const cyclesToRun = Math.floor(cycleAccum);
+                    cycleAccum -= cyclesToRun;
+                    instance.exports.step_cycles(gb, cyclesToRun);
                      /* TODO(yhr0x43): fixed point cycle computation */
                      /* cycle speed is 2^20Hz, (2^20/(2*10^5))=(2^14/5^3) cycle/5µs */
                      /* DOMHighResTimeStamp should be accurate to 5µs, thus the fixed-point math */
                      /* const delta5us = Math.round(delta * 200); */
-                     /* instance.exports.run_frame(gb, Math.round(delta * 1048.576)); */
-                     instance.exports.run_frame(gb, Math.round(delta * 1048.576 / 16));
-                     /* instance.exports.run_frame(gb, 1024); */
-
+                    
                      ctx.putImageData(
                          new ImageData(
                              new Uint8ClampedArray(
@@ -99,17 +130,6 @@
                              ),
                              app.width,
                              app.height),
-                         0, 0);
-
-                     debug_canvas.putImageData(
-                         new ImageData(
-                             new Uint8ClampedArray(
-                                 memory.buffer,
-                                 tile_image_ptr,
-                                 0x40000
-                             ),
-                             0x100,
-                             0x100),
                          0, 0);
                      requestAnimationFrame(draw);
                  }

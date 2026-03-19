@@ -16,8 +16,8 @@ trait AddrConvert8 {
 impl AddrConvert8 for u8 {
     fn as_hiaddr(&self) -> u16 {
         0xFF00 | (*self as u16)
+        }
     }
-}
 
 enum HiLo {
     Hi,
@@ -188,7 +188,7 @@ impl ReadVal {
             *val
         } else {
             unreachable!("illegal 8-bit value read")
-        }
+    }
     }
 
     pub fn get16(&self) -> u16 {
@@ -237,7 +237,7 @@ mod inst {
             3 => cpu.hl().post_dec(1),
             _ => unreachable!("invalid reg indirect 16 idx"),
         }))
-    }
+        }
 
     #[inline(always)]
     fn decode_regind16_dst(cpu: &Cpu, idx: u8, val: u8) -> Stage {
@@ -261,8 +261,8 @@ mod inst {
             2 => cpu.hl(),
             3 => cpu.af(),
             _ => unreachable!(),
-        }
     }
+}
 
     #[inline(always)]
     fn decode_reg16_src(cpu: &Cpu, idx: u8) -> Stage {
@@ -330,7 +330,7 @@ mod inst {
             Phase::InstFetch => {
                 let idx = cpu.opcode & 0x7;
                 decode_regind8_src(cpu, idx)
-            }
+    }
             Phase::ValueReady(src) => {
                 let offset = (cpu.opcode >> 3) & 0x7;
                 let z = ((src.get8() & (1u8 << offset) == 0) as u8) << Cpu::ZBIT;
@@ -636,7 +636,7 @@ mod inst {
                 decode_regind8_dst(cpu, idx, dec)
             }
         }
-    }
+        }
 
     // TODO(yhr0x43): more readable rotate and shift
     fn rlca(cpu: &Cpu, phase: Phase) -> Stage {
@@ -808,7 +808,7 @@ mod inst {
     }
 
     fn xor(cpu: &Cpu, phase: Phase) -> Stage {
-        // XOR A, r/m8
+            // XOR A, r/m8
         match phase {
             Phase::InstFetch => {
                 let idx = cpu.opcode & 0x07;
@@ -894,8 +894,8 @@ mod inst {
         match phase {
             Phase::InstFetch => Stage::Read(OpdSrc::Mem8(cpu.pc().pre_inc(1))),
             Phase::ValueReady(_) => sbc(cpu, phase),
-        }
-    }
+                    }
+                }
 
     fn andimm(cpu: &Cpu, phase: Phase) -> Stage {
         // AND A, n8
@@ -955,7 +955,7 @@ mod inst {
             Phase::ValueReady(_) => {
                 if cond(cpu.opcode, cpu.f().get()) {
                     ret(cpu, phase)
-                } else {
+        } else {
                     cpu.pc().inc(1);
                     Stage::Fetch
                 }
