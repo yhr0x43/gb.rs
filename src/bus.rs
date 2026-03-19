@@ -43,6 +43,7 @@ impl Bus {
     }
 
     pub fn read_joystate(&self) -> u8 {
+        
         !(self.joy_state >> (4 * (self.joy_sel - 1))) & 0x0F | self.joy_sel
     }
 

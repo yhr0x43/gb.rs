@@ -67,6 +67,10 @@ pub fn pause(gb: &mut gb::GB, val: i32) {
 }
 
 #[unsafe(no_mangle)]
-pub fn write_button_state(gb: &mut gb::GB, info: usize) {
-    gb.write_button_state(info as u8); // TODO(yhr0x43): ????
-}
+pub extern "C" fn write_button_state(gb: &mut gb::GB, info: usize) {
+    let gb = unsafe {
+        &mut *gb_ptr()
+    };
+
+    gb.write_button_state(info as u8);
+} 
