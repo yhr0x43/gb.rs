@@ -14,8 +14,6 @@ mod reg;
 mod wasm;
 
 use core::alloc::{GlobalAlloc, Layout};
-use core::mem::{MaybeUninit, forget};
-use core::ptr;
 
 use crate::wasm::*;
 
@@ -65,6 +63,7 @@ pub fn pause(gb: &mut gb::GB, val: i32) {
     gb.paused = val != 0;
     println!("{:?}", gb.cpu);
     println!("bank low {:X}, {:X}", gb.bus.cart.bank4, gb.bus.cart.bank2);
+    gb.stack_dump();
 }
 
 #[unsafe(no_mangle)]
@@ -76,6 +75,6 @@ pub extern "C" fn write_button_state(gb: &mut gb::GB, info: usize) {
 
     let bits_changed = previous_matrix & !current_matrix & 0x0F;
     if bits_changed != 0 {
-        // gb.bus.intr.request(bus::IntrType::Joypad);
+        gb.bus.intr.raise(intr::IntrSrc::Joypad);
     }
 }

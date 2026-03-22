@@ -1,7 +1,7 @@
 use crate::audio::Apu;
 use crate::cart::Cart;
 use crate::graphic::Ppu;
-use crate::intr::Intr;
+use crate::intr::{Intr, IntrSrc};
 use crate::timer::Timer;
 
 pub(crate) type Addr = u16;
@@ -20,7 +20,7 @@ pub(crate) struct Bus {
     wram: [u8; 0x2000],
     hram: [u8; 0x7F],
 
-    boot_map: bool,
+    pub(crate) boot_map: bool,
 }
 
 impl Bus {
@@ -38,17 +38,6 @@ impl Bus {
         self.joy_state = 0xFF;
     }
 
-    pub fn write_joystate(&mut self, state: u8) {
-        let previous_matrix = self.read_joystate();
-
-        self.joy_state = state;
-        let current_matrix = self.read_joystate();
-        let bits_changed = previous_matrix & !current_matrix & 0x0F;
-        if bits_changed != 0 {
-            self.intr.request(intr::IntrSrc::Joypad);
-        }
-    }
-
     pub fn write_joy_sel(&mut self, value: u8) {
         let previous_matrix = self.read_joystate();
         self.joy_sel = value & 0x30;
@@ -57,7 +46,7 @@ impl Bus {
 
         let bits_changed = previous_matrix & !current_matrix & 0x0F; 
         if bits_changed != 0 {
-            self.intr.request(intr::IntrSrc::Joypad);
+            self.intr.raise(IntrSrc::Joypad);
         }
     }
 
@@ -144,7 +133,12 @@ impl Bus {
             0xFF43 => self.ppu.scx = val,
             0xFF44 => self.ppu.ly = val,
             0xFF45 => self.ppu.lyc = val,
-            0xFF46 => todo!("oam dma: {:02X}", val),
+            0xFF46 => {
+                for i in 0..0xA0 {
+                    // TODO(yhr0x43): proper dma
+                    self.ppu.write_oam(0xFE00 | i, self.read(((val as u16) << 8) | i))
+                }
+            },
             0xFF47 => self.ppu.bgp = val,
             0xFF48 => self.ppu.obp0 = val,
             0xFF49 => self.ppu.obp1 = val,

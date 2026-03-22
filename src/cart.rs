@@ -1,6 +1,5 @@
 use crate::bus;
 use crate::gb;
-use crate::*;
 
 use core::cmp;
 
@@ -111,11 +110,9 @@ impl Cart {
                 self.ram_we = val & 0x0F == 0xA;
             }
             0x2000..0x4000 => {
-                println!("bank2xxx {}", val);
                 self.bank2 = cmp::max(val & 0x1F, 1);
             }
             0x4000..0x6000 => {
-                println!("bank4xxx {}", val);
                 self.bank4 = val & 0x03;
             }
             0x6000..0x8000 => {

@@ -41,11 +41,11 @@ impl Intr {
 
     pub fn tick(&mut self, cpu: &mut cpu::Cpu) {
         let trail = (self.reg_if & self.reg_ie).trailing_zeros() as u16;
-        if matches!(trail, 5..) {
+        if trail > 4 {
             return;
         }
         if cpu.intr(0x0040 + trail * 0x8) {
-            self.reg_if &= 1 << trail;
+            self.reg_if &= !(1 << trail);
         }
     }
 }

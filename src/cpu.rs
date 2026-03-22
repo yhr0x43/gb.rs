@@ -16,8 +16,8 @@ trait AddrConvert8 {
 impl AddrConvert8 for u8 {
     fn as_hiaddr(&self) -> u16 {
         0xFF00 | (*self as u16)
-        }
     }
+}
 
 enum HiLo {
     Hi,
@@ -188,7 +188,7 @@ impl ReadVal {
             *val
         } else {
             unreachable!("illegal 8-bit value read")
-    }
+        }
     }
 
     pub fn get16(&self) -> u16 {
@@ -237,7 +237,7 @@ mod inst {
             3 => cpu.hl().post_dec(1),
             _ => unreachable!("invalid reg indirect 16 idx"),
         }))
-        }
+    }
 
     #[inline(always)]
     fn decode_regind16_dst(cpu: &Cpu, idx: u8, val: u8) -> Stage {
@@ -261,8 +261,8 @@ mod inst {
             2 => cpu.hl(),
             3 => cpu.af(),
             _ => unreachable!(),
+        }
     }
-}
 
     #[inline(always)]
     fn decode_reg16_src(cpu: &Cpu, idx: u8) -> Stage {
@@ -289,39 +289,107 @@ mod inst {
             Phase::InstFetch => decode_regind8_src(cpu, idx),
             Phase::ValueReady(src) => {
                 let mut rot = src.get8().rotate_left(1);
-                let mut flg;
-                if cpu.opcode & 0x10 == 0 {
-                    flg = (rot & 0x01) << Cpu::CBIT;
+                let c = (if cpu.opcode & 0x10 == 0 {
+                    (rot & 0x01) != 0
                 } else {
-                    flg = cpu.f().get() & 0x10 >> 4;
-                    masked_swap(&mut rot, &mut flg, 0x01);
-                }
-                flg <<= 4;
-                flg |= ((rot == 0) as u8) << Cpu::ZBIT;
-                cpu.f().set(flg);
+                    let mut uc = (cpu.f().get() & (1 << Cpu::CBIT) != 0) as u8;
+                    masked_swap(&mut rot, &mut uc, 0x01);
+                    uc != 0
+                } as u8)
+                    << Cpu::CBIT;
+                let z = ((rot == 0) as u8) << Cpu::ZBIT;
+                cpu.f().set(z | c);
                 cpu.pc().inc(1);
                 decode_regind8_dst(cpu, idx, rot)
             }
         }
     }
 
-    fn rrc(cpu: &Cpu, _phase: Phase) -> Stage {
-        todo!("inst {:?}", cpu)
+    fn rr(cpu: &Cpu, phase: Phase) -> Stage {
+        // RRC r/m8; RR r/m8
+        let idx = cpu.opcode & 0x7;
+        match phase {
+            Phase::InstFetch => decode_regind8_src(cpu, idx),
+            Phase::ValueReady(src) => {
+                let mut rot = src.get8().rotate_right(1);
+                let c = (if cpu.opcode & 0x10 == 0 {
+                    (rot & 0x80) != 0
+                } else {
+                    let mut uc = ((cpu.f().get() & (1 << Cpu::CBIT) != 0) as u8) << 7;
+                    masked_swap(&mut rot, &mut uc, 0x80);
+                    uc != 0
+                } as u8)
+                    << Cpu::CBIT;
+                let z = ((rot == 0) as u8) << Cpu::ZBIT;
+                cpu.f().set(z | c);
+                cpu.pc().inc(1);
+                decode_regind8_dst(cpu, idx, rot)
+            }
+        }
     }
-    fn rr(cpu: &Cpu, _phase: Phase) -> Stage {
-        todo!("inst {:?}", cpu)
+
+    fn sla(cpu: &Cpu, phase: Phase) -> Stage {
+        // SLA r/m8
+        let idx = cpu.opcode & 0x7;
+        match phase {
+            Phase::InstFetch => decode_regind8_src(cpu, idx),
+            Phase::ValueReady(src) => {
+                let shr = src.get8() << 1;
+                let c = (src.get8() & 0x01) << Cpu::CBIT;
+                let z = ((shr == 0) as u8) << Cpu::ZBIT;
+                cpu.f().set(z | c);
+                cpu.pc().inc(1);
+                decode_regind8_dst(cpu, idx, shr)
+            }
+        }
     }
-    fn sla(cpu: &Cpu, _phase: Phase) -> Stage {
-        todo!("inst {:?}", cpu)
+
+    fn sra(cpu: &Cpu, phase: Phase) -> Stage {
+        // SRA r/m8
+        let idx = cpu.opcode & 0x7;
+        match phase {
+            Phase::InstFetch => decode_regind8_src(cpu, idx),
+            Phase::ValueReady(src) => {
+                let shr = ((src.get8().cast_signed()) >> 1).cast_unsigned();
+                let c = (src.get8() & 0x01) << Cpu::CBIT;
+                let z = ((shr == 0) as u8) << Cpu::ZBIT;
+                cpu.f().set(z | c);
+                cpu.pc().inc(1);
+                decode_regind8_dst(cpu, idx, shr)
+            }
+        }
     }
-    fn sra(cpu: &Cpu, _phase: Phase) -> Stage {
-        todo!("inst {:?}", cpu)
+
+    fn swap(cpu: &Cpu, phase: Phase) -> Stage {
+        // SWAP r/m8
+        let idx = cpu.opcode & 0x7;
+        match phase {
+            Phase::InstFetch => decode_regind8_src(cpu, idx),
+            Phase::ValueReady(src) => {
+                let swap = cpu.a().get();
+                cpu.a().set(src.get8());
+                let z = ((src.get8() == 0) as u8) << Cpu::ZBIT;
+                cpu.f().set(z);
+                cpu.pc().inc(1);
+                decode_regind8_dst(cpu, idx, swap)
+            }
+        }
     }
-    fn swap(cpu: &Cpu, _phase: Phase) -> Stage {
-        todo!("inst {:?}", cpu)
-    }
-    fn srl(cpu: &Cpu, _phase: Phase) -> Stage {
-        todo!("inst {:?}", cpu)
+
+    fn srl(cpu: &Cpu, phase: Phase) -> Stage {
+        // SRL r/m8
+        let idx = cpu.opcode & 0x7;
+        match phase {
+            Phase::InstFetch => decode_regind8_src(cpu, idx),
+            Phase::ValueReady(src) => {
+                let shr = src.get8() >> 1;
+                let c = (src.get8() & 0x01) << Cpu::CBIT;
+                let z = ((shr == 0) as u8) << Cpu::ZBIT;
+                cpu.f().set(z | c);
+                cpu.pc().inc(1);
+                decode_regind8_dst(cpu, idx, shr)
+            }
+        }
     }
 
     fn bit(cpu: &Cpu, phase: Phase) -> Stage {
@@ -330,7 +398,7 @@ mod inst {
             Phase::InstFetch => {
                 let idx = cpu.opcode & 0x7;
                 decode_regind8_src(cpu, idx)
-    }
+            }
             Phase::ValueReady(src) => {
                 let offset = (cpu.opcode >> 3) & 0x7;
                 let z = ((src.get8() & (1u8 << offset) == 0) as u8) << Cpu::ZBIT;
@@ -372,7 +440,7 @@ mod inst {
     #[rustfmt::skip]
     pub(super) const PREFIX_INST_TABLE: [InstOp; 0x20] = [
         /* 0o0xx */
-        rl,   rrc,  rl,   rr,   sla,  sra,  swap, srl,
+        rl,   rr,   rl,   rr,   sla,  sra,  swap, srl,
         /* 0o1xx */
         bit,  bit,  bit,  bit,  bit,  bit,  bit,  bit,
         /* 0o2xx */
@@ -406,10 +474,6 @@ mod inst {
     #[inline(always)]
     fn negf(f: u8) -> u8 {
         (f ^ (1 << Cpu::HBIT | 1 << Cpu::CBIT)) | 1 << Cpu::NBIT
-    }
-
-    fn unimpl(cpu: &Cpu, _: Phase) -> Stage {
-        todo!("inst {:?}", cpu)
     }
 
     fn inval(cpu: &Cpu, _: Phase) -> Stage {
@@ -577,7 +641,10 @@ mod inst {
     }
 
     fn ldsphl(cpu: &Cpu, _phase: Phase) -> Stage {
-        todo!("inst {:?}", cpu)
+        // LD SP, HL
+        cpu.pc().inc(1);
+        cpu.sp().set(cpu.hl().get());
+        Stage::Write(OpdDst::Done)
     }
 
     fn offtsp(cpu: &Cpu, phase: Phase) -> Stage {
@@ -659,41 +726,72 @@ mod inst {
                 decode_regind8_dst(cpu, idx, dec)
             }
         }
-        }
-
-    // TODO(yhr0x43): more readable rotate and shift
-    fn rlca(cpu: &Cpu, phase: Phase) -> Stage {
-        // RLCA
-        match phase {
-            Phase::InstFetch => Stage::Read(OpdSrc::Done8(cpu.a().get())),
-            Phase::ValueReady(src) => {
-                let rot = src.get8().rotate_left(1);
-                let z = ((rot == 0) as u8) << Cpu::ZBIT;
-                let c = (rot & 0x01) << Cpu::CBIT;
-                cpu.f().set(z | c);
-                cpu.pc().inc(1);
-                cpu.a().set(rot);
-                Stage::Fetch
-            }
-        }
     }
 
-    fn rla(cpu: &Cpu, phase: Phase) -> Stage {
-        // RLA
-        match phase {
-            Phase::InstFetch => Stage::Read(OpdSrc::Done8(cpu.a().get())),
-            Phase::ValueReady(src) => {
-                let mut rot = src.get8().rotate_left(1);
-                let mut flg = cpu.f().get() >> 4 & 0x01;
-                masked_swap(&mut rot, &mut flg, 0x01);
-                flg <<= 4;
-                flg |= ((rot == 0) as u8) << Cpu::ZBIT;
-                cpu.f().set(flg);
-                cpu.pc().inc(1);
-                cpu.a().set(rot);
-                Stage::Fetch
-            }
-        }
+    fn rla(cpu: &Cpu, _phase: Phase) -> Stage {
+        // RLCA; RLA;
+        let mut rot = cpu.a().get().rotate_left(1);
+        let c = (if cpu.opcode & 0x10 == 0 {
+            (rot & 0x01) != 0
+        } else {
+            let mut uc = (cpu.f().get() & (1 << Cpu::CBIT) != 0) as u8;
+            masked_swap(&mut rot, &mut uc, 0x01);
+            uc != 0
+        } as u8)
+            << Cpu::CBIT;
+        let z = ((rot == 0) as u8) << Cpu::ZBIT;
+        cpu.f().set(z | c);
+        cpu.pc().inc(1);
+        cpu.a().set(rot);
+        Stage::Fetch
+    }
+
+    fn rra(cpu: &Cpu, _phase: Phase) -> Stage {
+        // RRCA; RRA
+        let mut rot = cpu.a().get().rotate_right(1);
+        let c = (if cpu.opcode & 0x10 == 0 {
+            (rot & 0x80) != 0
+        } else {
+            let mut uc = ((cpu.f().get() & (1 << Cpu::CBIT) != 0) as u8) << 7;
+            masked_swap(&mut rot, &mut uc, 0x80);
+            uc != 0
+        } as u8)
+            << Cpu::CBIT;
+        let z = ((rot == 0) as u8) << Cpu::ZBIT;
+        cpu.f().set(z | c);
+        cpu.pc().inc(1);
+        cpu.a().set(rot);
+        Stage::Fetch
+    }
+
+    fn scf(cpu: &Cpu, _phase: Phase) -> Stage {
+        let z = cpu.f().get() & (1 << Cpu::ZBIT);
+        let c = 1 << Cpu::CBIT;
+        cpu.f().set(z | c);
+        cpu.pc().inc(1);
+        Stage::Fetch
+    }
+
+    fn ccf(cpu: &Cpu, _phase: Phase) -> Stage {
+        let f = cpu.f().get();
+        let z = f & (1 << Cpu::ZBIT);
+        let c = !(f & (1 << Cpu::CBIT));
+        cpu.f().set(z | c);
+        cpu.pc().inc(1);
+        Stage::Fetch
+    }
+
+    fn cpl(cpu: &Cpu, _phase: Phase) -> Stage {
+        cpu.a().set(!cpu.a().get());
+        let n = 1 << Cpu::NBIT;
+        let h = 1 << Cpu::HBIT;
+        cpu.f().set(n | h);
+        cpu.pc().inc(1);
+        Stage::Fetch
+    }
+
+    fn daa(cpu: &Cpu, _phase: Phase) -> Stage {
+        todo!("inst: {:?}", cpu)
     }
 
     fn jr(cpu: &Cpu, phase: Phase) -> Stage {
@@ -753,8 +851,12 @@ mod inst {
         }
     }
 
-    fn jphl(cpu: &Cpu, _phase: Phase) -> Stage {
-        todo!("inst {:?}", cpu)
+    fn jphl(cpu: &Cpu, phase: Phase) -> Stage {
+        // JP HL
+        match phase {
+            Phase::InstFetch => Stage::Read(OpdSrc::Done16(cpu.hl().get())),
+            Phase::ValueReady(_) => jp(cpu, phase),
+        }
     }
 
     fn add(cpu: &Cpu, phase: Phase) -> Stage {
@@ -770,10 +872,9 @@ mod inst {
                 let (sum, c) = opd1.carrying_add(opd2, false);
                 cpu.a().set(sum);
                 let z = ((sum == 0) as u8) << Cpu::ZBIT;
-                let n = 1u8 << Cpu::NBIT;
                 let h = (((opd1 & 0x0F + opd2 & 0x0F) & 0x10 != 0) as u8) << Cpu::HBIT;
                 let c = (c as u8) << Cpu::CBIT;
-                cpu.f().set(z | n | h | c);
+                cpu.f().set(z | h | c);
                 cpu.pc().inc(1);
                 Stage::Fetch
             }
@@ -781,7 +882,25 @@ mod inst {
     }
 
     fn adc(cpu: &Cpu, phase: Phase) -> Stage {
-        todo!("inst {:?}", cpu)
+        // ADC A, r/m8
+        match phase {
+            Phase::InstFetch => {
+                let idx = cpu.opcode & 0x07;
+                decode_regind8_src(cpu, idx)
+            }
+            Phase::ValueReady(src) => {
+                let opd1 = cpu.a().get();
+                let opd2 = src.get8();
+                let (sum, c) = opd1.carrying_add(opd2, (cpu.f().get() & (1 << Cpu::CBIT)) != 0);
+                cpu.a().set(sum);
+                let z = ((sum == 0) as u8) << Cpu::ZBIT;
+                let h = (((opd1 & 0x0F + opd2 & 0x0F) & 0x10 != 0) as u8) << Cpu::HBIT;
+                let c = (c as u8) << Cpu::CBIT;
+                cpu.f().set(z | h | c);
+                cpu.pc().inc(1);
+                Stage::Fetch
+            }
+        }
     }
 
     fn sub(cpu: &Cpu, phase: Phase) -> Stage {
@@ -808,7 +927,26 @@ mod inst {
     }
 
     fn sbc(cpu: &Cpu, phase: Phase) -> Stage {
-        todo!("inst {:?}", cpu)
+        // SBC A, r/m8
+        match phase {
+            Phase::InstFetch => {
+                let idx = cpu.opcode & 0x07;
+                decode_regind8_src(cpu, idx)
+            }
+            Phase::ValueReady(src) => {
+                let opd1 = cpu.a().get();
+                let opd2 = src.get8();
+                let (diff, c) = opd1.borrowing_sub(opd2, (cpu.f().get() & (1 << Cpu::CBIT)) != 0);
+                cpu.a().set(diff);
+                let z = ((diff == 0) as u8) << Cpu::ZBIT;
+                let n = 1u8 << Cpu::NBIT;
+                let h = ((opd1 & 0x0F < opd2 & 0x0F) as u8) << Cpu::HBIT;
+                let c = (c as u8) << Cpu::CBIT;
+                cpu.f().set(z | n | h | c);
+                cpu.pc().inc(1);
+                Stage::Fetch
+            }
+        }
     }
 
     fn and(cpu: &Cpu, phase: Phase) -> Stage {
@@ -831,7 +969,7 @@ mod inst {
     }
 
     fn xor(cpu: &Cpu, phase: Phase) -> Stage {
-            // XOR A, r/m8
+        // XOR A, r/m8
         match phase {
             Phase::InstFetch => {
                 let idx = cpu.opcode & 0x07;
@@ -888,6 +1026,27 @@ mod inst {
         }
     }
 
+    fn addhl(cpu: &Cpu, phase: Phase) -> Stage {
+        // ADD HL, r16
+        let idx = cpu.opcode >> 4 & 0x03;
+
+        match phase {
+            Phase::InstFetch => decode_reg16_src(cpu, idx),
+            Phase::ValueReady(src) => {
+                let opd1 = cpu.hl().get();
+                let opd2 = src.get16();
+                let (sum, c) = opd1.carrying_add(opd2, false);
+                cpu.hl().set(sum);
+                let z = cpu.f().get() & 1u8 << Cpu::ZBIT;
+                let h = (((opd1 & 0x0FFF + opd2 & 0x0FFF) & 0x1000 != 0) as u8) << Cpu::HBIT;
+                let c = (c as u8) << Cpu::CBIT;
+                cpu.f().set(z | h | c);
+                cpu.pc().inc(1);
+                Stage::Write(OpdDst::Done)
+            }
+        }
+    }
+
     fn addimm(cpu: &Cpu, phase: Phase) -> Stage {
         // ADD A, n8
         match phase {
@@ -917,8 +1076,8 @@ mod inst {
         match phase {
             Phase::InstFetch => Stage::Read(OpdSrc::Mem8(cpu.pc().pre_inc(1))),
             Phase::ValueReady(_) => sbc(cpu, phase),
-                    }
-                }
+        }
+    }
 
     fn andimm(cpu: &Cpu, phase: Phase) -> Stage {
         // AND A, n8
@@ -979,7 +1138,7 @@ mod inst {
             Phase::ValueReady(_) => {
                 if cond(cpu.opcode, cpu.f().get()) {
                     ret(cpu, phase)
-        } else {
+                } else {
                     cpu.pc().inc(1);
                     Stage::Fetch
                 }
@@ -995,9 +1154,6 @@ mod inst {
                 Stage::Read(OpdSrc::Mem16(cpu.pc().post_inc(2)))
             }
             Phase::ValueReady(src) => {
-                if src.get16() == 0x0038 {
-                    println!("call");
-                }
                 Stage::Wait(OpdDst::Mem16(
                     cpu.sp().pre_dec(2),
                     cpu.pc().replace(src.get16()),
@@ -1061,22 +1217,32 @@ mod inst {
         Stage::Fetch
     }
 
+    fn halt(cpu: &Cpu, _phase: Phase) -> Stage {
+        cpu.pc().inc(1);
+        cpu.halt.set(true);
+        Stage::Fetch
+    }
+
+    fn stop(cpu: &Cpu, _phase: Phase) -> Stage {
+        todo!("inst: {:?}", cpu)
+    }
+
     /* PREFIX is inval because it is handled by outer fetch loop */
     #[rustfmt::skip]
     pub(super) const INST_TABLE: [InstOp; 0x100] = {
         [
             /* 0x0x */
-            nop,    ld16,   ldinda, inc16,  inc8,   dec8,   ld8imm, rlca,
-            ld16sp, unimpl, ldaind, dec16,  inc8,   dec8,   ld8imm, unimpl,
+            nop,    ld16,   ldinda, inc16,  inc8,   dec8,   ld8imm, rla,
+            ld16sp, addhl,  ldaind, dec16,  inc8,   dec8,   ld8imm, rra,
             /* 0x1x */
-            unimpl, ld16,   ldinda, inc16,  inc8,   dec8,   ld8imm, rla,
-            jr,     unimpl, ldaind, dec16,  inc8,   dec8,   ld8imm, unimpl,
+            stop,   ld16,   ldinda, inc16,  inc8,   dec8,   ld8imm, rla,
+            jr,     addhl,  ldaind, dec16,  inc8,   dec8,   ld8imm, rra,
             /* 0x2x */
-            jrcc,   ld16,   ldinda, inc16,  inc8,   dec8,   ld8imm, unimpl,
-            jrcc,   unimpl, ldaind, dec16,  inc8,   dec8,   ld8imm, unimpl,
+            jrcc,   ld16,   ldinda, inc16,  inc8,   dec8,   ld8imm, daa,
+            jrcc,   addhl,  ldaind, dec16,  inc8,   dec8,   ld8imm, cpl,
             /* 0x3x */
-            jrcc,   ld16,   ldinda, inc16,  inc8,   dec8,   ld8imm, unimpl,
-            jrcc,   unimpl, ldaind, dec16,  inc8,   dec8,   ld8imm, unimpl,
+            jrcc,   ld16,   ldinda, inc16,  inc8,   dec8,   ld8imm, scf,
+            jrcc,   addhl,  ldaind, dec16,  inc8,   dec8,   ld8imm, ccf,
             /* 0x4x */
             ld8,    ld8,    ld8,    ld8,    ld8,    ld8,    ld8,    ld8,
             ld8,    ld8,    ld8,    ld8,    ld8,    ld8,    ld8,    ld8,
@@ -1087,7 +1253,7 @@ mod inst {
             ld8,    ld8,    ld8,    ld8,    ld8,    ld8,    ld8,    ld8,
             ld8,    ld8,    ld8,    ld8,    ld8,    ld8,    ld8,    ld8,
             /* 0x7x */
-            ld8,    ld8,    ld8,    ld8,    ld8,    ld8,    unimpl, ld8,
+            ld8,    ld8,    ld8,    ld8,    ld8,    ld8,    halt,   ld8,
             ld8,    ld8,    ld8,    ld8,    ld8,    ld8,    ld8,    ld8,
             /* 0x8x */
             add,    add,    add,    add,    add,    add,    add,    add,
@@ -1117,7 +1283,7 @@ mod inst {
     };
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 enum IntrStage {
     None,
     Init(u16),
@@ -1159,6 +1325,7 @@ impl fmt::Debug for Cpu {
             .field("PC", &format_args!("{:04X}", self.pc().get()))
             .field("opcode", &format_args!("{:02X}", self.opcode))
             .field("stage", &self.stage)
+            .field("intr_stage", &self.intr_stage.get())
             .finish()
     }
 }
@@ -1206,6 +1373,9 @@ impl Cpu {
 
     pub fn intr(&self, addr: bus::Addr) -> bool {
         if self.ime.get() {
+            if self.halt.get() {
+                self.halt.set(false);
+            }
             self.intr_stage.set(IntrStage::Init(addr));
             true
         } else {
@@ -1222,6 +1392,7 @@ impl Cpu {
                 ImeSet::None
             }
         });
+
         let old_stage = self.intr_stage.get();
         self.intr_stage.set(match old_stage {
             IntrStage::None => IntrStage::None,
@@ -1250,9 +1421,9 @@ impl Cpu {
      * one tick is one M-cycle, 4 T states in Z80 terms
      * one M-cycle can only have at most 1 bus read/write
      */
-    pub fn tick(&mut self, bus: &mut bus::Bus) -> bool {
+    pub fn tick(&mut self, bus: &mut bus::Bus) {
         if self.stop.get() || self.halt.get() {
-            return false;
+            return;
         }
 
         let mut memop = false;
@@ -1308,7 +1479,5 @@ impl Cpu {
                 }
             }
         };
-
-        true
     }
 }
